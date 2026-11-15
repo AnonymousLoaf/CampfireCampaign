@@ -104,3 +104,26 @@ def test_m4_api():
             assert "Combat Superiority" in msg and "Weapon masteries" in msg or "Combat Superiority" in msg
         finally:
             db.close()
+
+
+def test_town_map_close_start_and_opening_report():
+    from app.dm.tools import ToolBox
+    from app.game import combat
+    from app.rules import character as ch
+    from app.world import battlemap as bm
+
+    m = bm.generate("town", 7)
+    kinds = {p["kind"] for p in m["props"]}
+    assert {"stall", "well"} <= kinds
+    assert all(c in "#.T~D" for row in m["cells"] for c in row)
+    sheet = ch.create({"name": "Brakka", "race": "dwarf", "subrace": "hill-dwarf", "class": "fighter",
+                       "background": "soldier", "ability_method": "standard",
+                       "abilities": {"STR": 15, "DEX": 13, "CON": 14, "INT": 8, "WIS": 12, "CHA": 10},
+                       "skills": ["Perception", "Survival"], "equipment_option": "defender"})
+    enc, lines = combat.start([("bandit", 2)], "town", [("c1", sheet)], seed=5, distance="close")
+    pcs = [t for t in enc["tokens"].values() if t["kind"] == "pc"]
+    mons = [t for t in enc["tokens"].values() if t["kind"] == "monster"]
+    gap = min(bm.distance_ft((p["x"], p["y"]), (q["x"], q["y"])) for p in pcs for q in mons)
+    assert gap <= 25 or any("attacks" in ln["text"] for ln in lines)  # enemies may already have closed in
+    report = ToolBox._combat_opening(enc, lines)
+    assert "Initiative" in report and "attacks:" in report and "Scimitar" in report

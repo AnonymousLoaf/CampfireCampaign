@@ -37,7 +37,8 @@ def line(text: str, kind: str = "combat", **data) -> dict:
 # ── setup ───────────────────────────────────────────────────────────────────
 
 def start(specs: list[tuple[str, int]], terrain: str, party: list[tuple[str, dict]], mode: str = "side",
-          death_rule: str = "standard", seed: int | None = None, ruleset: str = "2014") -> tuple[dict, list[dict]]:
+          death_rule: str = "standard", seed: int | None = None, ruleset: str = "2014",
+          distance: str = "far") -> tuple[dict, list[dict]]:
     """party: [(character_id, sheet)] — living characters only."""
     rng = random.Random(seed)
     m = bm.generate(terrain if terrain in bm.TERRAINS else "road", seed)
@@ -47,7 +48,7 @@ def start(specs: list[tuple[str, int]], terrain: str, party: list[tuple[str, dic
            "round_log": [], "custom_actions": [], "xp": 0, "outcome": None, "monsters_cr": []}
     taken: set = set()
     pcs = [(cid, s) for cid, s in party if not s.get("dead")]
-    for (cid, s), (x, y) in zip(pcs, bm.deploy(m, len(pcs), "left", taken, rng)):
+    for (cid, s), (x, y) in zip(pcs, bm.deploy(m, len(pcs), "left", taken, rng, distance)):
         taken.add((x, y))
         tid = f"pc-{cid}"
         enc["tokens"][tid] = {"id": tid, "name": s["name"], "kind": "pc", "character_id": cid, "x": x, "y": y,
@@ -60,7 +61,7 @@ def start(specs: list[tuple[str, int]], terrain: str, party: list[tuple[str, dic
         rec = srd.monsters(ruleset).get(idx) or srd.monsters().get(idx)
         if not rec:
             continue
-        spots = bm.deploy(m, count, "right", taken, rng)
+        spots = bm.deploy(m, count, "right", taken, rng, distance)
         for i, (x, y) in enumerate(spots):
             taken.add((x, y))
             n += 1

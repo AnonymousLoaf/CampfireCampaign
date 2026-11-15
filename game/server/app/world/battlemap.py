@@ -11,8 +11,49 @@ from __future__ import annotations
 import heapq
 import random
 
-TERRAINS = ("road", "forest", "tavern", "cave", "dungeon", "ruins", "camp", "swamp")
+TERRAINS = ("road", "forest", "tavern", "cave", "dungeon", "ruins", "camp", "swamp", "town")
 BLOCKING = set("#T ")
+DISTANCES = ("close", "near", "far")
+
+
+def _town(rng: random.Random) -> tuple[list[list[str]], list[dict]]:
+    """A street or market square: house fronts with doors top and bottom, market stalls, a well, carts and barrels."""
+    w, h = 20, 14
+    g = [["." for _ in range(w)] for _ in range(h)]
+    props: list[dict] = []
+    for y in (0, h - 1):  # house fronts
+        for x in range(w):
+            g[y][x] = "#"
+        for x in rng.sample(range(2, w - 2, 3), 3):
+            g[y][x] = "D"
+    for y in (2, h - 3):  # rows of stalls, two squares each, with gaps to walk through
+        x = rng.randint(1, 3)
+        while x + 1 < w - 1:
+            if rng.random() < 0.7:
+                for i in (0, 1):
+                    g[y][x + i] = "T"
+                    props.append({"x": x + i, "y": y, "kind": "stall"})
+            x += rng.randint(4, 5)
+    wx, wy = rng.choice([(w // 2, 4), (w // 2 - 1, h - 5)])  # the well, away from the middle of the square
+    g[wy][wx] = "T"
+    props.append({"x": wx, "y": wy, "kind": "well"})
+    mid = h // 2
+    for _ in range(7):  # carts, barrels and crates, kept off the central lane
+        x, y = rng.randint(1, w - 2), rng.randint(3, h - 4)
+        if g[y][x] == "." and abs(y - mid) > 1:
+            kind = rng.choice(["barrel", "barrel", "crate", "crate", "cart"])
+            if kind == "cart" and x + 1 < w - 1 and g[y][x + 1] == ".":
+                for i in (0, 1):
+                    g[y][x + i] = "T"
+                    props.append({"x": x + i, "y": y, "kind": "cart"})
+            elif kind != "cart":
+                g[y][x] = "T"
+                props.append({"x": x, "y": y, "kind": kind})
+    for _ in range(8):  # spilled goods
+        x, y = rng.randrange(1, w - 1), rng.randrange(1, h - 1)
+        if g[y][x] == ".":
+            g[y][x] = "~"
+    return g, props
 
 
 def _dungeon(rng: random.Random) -> list[list[str]]:
@@ -103,7 +144,11 @@ def _swamp(rng: random.Random) -> list[list[str]]:
 
 def generate(terrain: str, seed: int | None = None) -> dict:
     rng = random.Random(seed)
-    if terrain == "dungeon":
+    pre_props: list[dict] = []
+    if terrain == "town":
+        g, pre_props = _town(rng)
+        w, h = len(g[0]), len(g)
+    elif terrain == "dungeon":
         g = _dungeon(rng)
         w, h = len(g[0]), len(g)
     elif terrain == "ruins":
@@ -175,20 +220,21 @@ def generate(terrain: str, seed: int | None = None) -> dict:
                     g[y][x] = "T"
                 elif r < 0.22:
                     g[y][x] = "~"
-    props = _props(terrain, g, rng)
+    props = _props(terrain, g, rng, pre_props)
     return {"terrain": terrain, "grid": {"w": w, "h": h}, "cells": ["".join(row) for row in g],
             "props": props, "difficult": DIFFICULT_NAMES.get(terrain, "difficult terrain")}
 
 
 DIFFICULT_NAMES = {"road": "brush", "forest": "undergrowth", "tavern": "broken furniture", "cave": "rubble",
-                   "dungeon": "rubble", "ruins": "fallen masonry", "camp": "brush", "swamp": "bog"}
+                   "dungeon": "rubble", "ruins": "fallen masonry", "camp": "brush", "swamp": "bog",
+                   "town": "spilled goods"}
 
 
-def _props(terrain: str, g: list[list[str]], rng: random.Random) -> list[dict]:
+def _props(terrain: str, g: list[list[str]], rng: random.Random, props: list[dict] | None = None) -> list[dict]:
     """Name every obstacle square so the map can draw a table, tree, barrel… instead of a block.
     May add a few extra obstacles (barrels, a cart, stalagmites) for flavour."""
     h, w = len(g), len(g[0])
-    props: list[dict] = []
+    props = list(props or [])
 
     def floor_spots(pred=lambda x, y: True):
         return [(x, y) for y in range(h) for x in range(w) if g[y][x] == "." and pred(x, y)]
@@ -293,13 +339,26 @@ def reachable(m: dict, start: tuple[int, int], budget_ft: int, occupied: set[tup
     return best
 
 
-def deploy(m: dict, count: int, side: str, taken: set[tuple[int, int]], rng: random.Random) -> list[tuple[int, int]]:
-    """Starting squares: PCs on the left edge, enemies on the right."""
+def deploy(m: dict, count: int, side: str, taken: set[tuple[int, int]], rng: random.Random,
+           distance: str = "far") -> list[tuple[int, int]]:
+    """Starting squares: PCs on the left, enemies on the right. `distance` is how far apart the sides start:
+    far = opposite edges (an ambush seen coming), near = about 30-40 ft, close = 10-20 ft (a standoff)."""
     w, h = m["grid"]["w"], m["grid"]["h"]
-    cols = range(0, max(2, w // 4)) if side == "left" else range(w - 1, w - 1 - max(2, w // 4), -1)
-    spots = [(x, y) for x in cols for y in range(h) if passable(m, x, y) and (x, y) not in taken]
-    spots.sort(key=lambda p: (abs(p[1] - h // 2) + (p[0] if side == "left" else w - 1 - p[0]) * 0.5, rng.random()))
+    mid = w // 2
+    if distance == "close":
+        anchor = mid - 2 if side == "left" else mid + 1
+        cols = range(mid - 2, mid - 5, -1) if side == "left" else range(mid + 1, mid + 4)
+    elif distance == "near":
+        anchor = mid - 4 if side == "left" else mid + 3
+        cols = range(mid - 4, mid - 8, -1) if side == "left" else range(mid + 3, mid + 7)
+    else:
+        anchor = 0 if side == "left" else w - 1
+        cols = range(0, max(2, w // 4)) if side == "left" else range(w - 1, w - 1 - max(2, w // 4), -1)
+    spots = [(x, y) for x in cols for y in range(h) if 0 <= x < w and passable(m, x, y) and (x, y) not in taken]
+    spots.sort(key=lambda p: (abs(p[1] - h // 2) + abs(p[0] - anchor) * 0.5, rng.random()))
     out = spots[:count]
+    if len(out) < count and distance != "far":  # band full or walled off: spread outwards on our own side
+        return out + deploy(m, count - len(out), side, taken | set(out), rng, "far" if distance == "near" else "near")
     if len(out) < count:  # fall back to any floor
         extra = [(x, y) for y in range(h) for x in range(w) if passable(m, x, y) and (x, y) not in taken
                  and (x, y) not in out]

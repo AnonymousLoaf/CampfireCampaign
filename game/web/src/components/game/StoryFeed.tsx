@@ -3,6 +3,22 @@ import type { LogEntry } from "../../api/types";
 import { D20Icon } from "../DiceRoller";
 import { SpeakButton } from "../atmosphere/AudioControls";
 
+/** **bold** and *italic* / _italic_ from the DM's prose, as React nodes (no HTML is ever injected). */
+function inlineMarks(text: string): React.ReactNode[] {
+  const out: React.ReactNode[] = [];
+  const re = /\*\*(.+?)\*\*|\*(?!\s)(.+?)\*|(?<![\w])_(?!\s)(.+?)_(?![\w])/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) {
+    if (m.index > last) out.push(text.slice(last, m.index));
+    if (m[1] !== undefined) out.push(<strong key={m.index}>{m[1]}</strong>);
+    else out.push(<em key={m.index}>{m[2] ?? m[3]}</em>);
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
+
 export function Paragraphs({ text }: { text: string }) {
   const paras = text.split(/\n{2,}|\r\n\r\n/).map((p) => p.trim()).filter(Boolean);
   return (
@@ -11,7 +27,7 @@ export function Paragraphs({ text }: { text: string }) {
         <p key={i}>
           {p.split("\n").map((line, j, arr) => (
             <span key={j}>
-              {line}
+              {inlineMarks(line.replace(/^#{1,6}\s+/, ""))}
               {j < arr.length - 1 && <br />}
             </span>
           ))}

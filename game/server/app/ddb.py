@@ -122,7 +122,7 @@ def to_sheet(d: dict) -> dict:
     if level > rules.MAX_LEVEL:
         issues.append({"issue": f"level {level} is capped at {rules.MAX_LEVEL} for now", "fix": f"play at level {rules.MAX_LEVEL}"})
     if len(classes) > 1:
-        issues.append({"issue": "multiclassing isn't supported yet; imported as " + main["name"], "fix": "—"})
+        issues.append({"issue": "multiclassing isn't supported yet; imported as " + main["name"], "fix": ""})
     scores = rep["abilities"] or {a: 10 for a in ("STR", "DEX", "CON", "INT", "WIS", "CHA")}
 
     species = (rep.get("species") or "Human")
@@ -139,7 +139,7 @@ def to_sheet(d: dict) -> dict:
                 break
         else:
             issues.append({"issue": f"species {species} isn't in the free 2024 rules; its traits are kept as custom entries",
-                           "fix": "—"})
+                           "fix": ""})
     else:
         for sr in srd.subraces().values():
             if sr["name"].lower() == species.lower():
@@ -152,7 +152,7 @@ def to_sheet(d: dict) -> dict:
                     break
             else:
                 issues.append({"issue": f"species {species} isn't in the free 2014 rules; its traits are kept as custom entries",
-                               "fix": "—"})
+                               "fix": ""})
 
     profs, expertise = set(), set()
     skill_by_slug = {_slug(s): s for s in SKILLS}
@@ -248,12 +248,19 @@ def to_sheet(d: dict) -> dict:
             ch.level_up(sheet, auto)
         except RulesError:
             ch.level_up(sheet, ch.auto_choices(sheet))
+    wm = cls.get("weapon_mastery") or {}
+    if ruleset == "2024" and wm:
+        # Weapon masteries: the weapons the character carries first, then whatever the level-ups picked.
+        n_m = max((int(v) for k, v in wm.items() if sheet["level"] >= int(k)), default=0)
+        allowed = {o["weapon_key"] for o in ch._mastery_options(cls, ruleset)}
+        carried = [it.get("key") for it in sheet["inventory"] if it.get("key") in allowed]
+        sheet["masteries"] = list(dict.fromkeys(carried + list(sheet.get("masteries") or []) + sorted(allowed)))[:n_m]
     if sub_name and not sub_index and sheet["level"] >= cls["subclass_level"]:
         sheet["subclass"] = sub_name  # keep the player's own subclass name; its features come in as custom entries
         sheet["features"] = [f for f in sheet["features"] if f["name"] not in SRD_SUBCLASS_FEATURES
                              and not re.match(r"(Martial Archetype|Roguish Archetype|Arcane Tradition)", f["name"])]
         issues.append({"issue": f"{sub_name} isn't in the free rules — its features are kept as text for the DM, and the "
-                                f"game's automatic subclass bonuses don't apply to it", "fix": "—"})
+                                f"game's automatic subclass bonuses don't apply to it", "fix": ""})
     if rep.get("hp_max") and level <= rules.MAX_LEVEL:
         sheet["hp_max"] = sheet["hp"] = int(rep["hp_max"])
     sheet["xp"] = rules.XP_THRESHOLDS[sheet["level"]]

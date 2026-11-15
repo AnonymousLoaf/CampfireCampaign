@@ -299,7 +299,8 @@ export function CharacterSheet({
           <h4>Import notes</h4>
           {c.issues.map((i, n) => (
             <div key={n} className="small">
-              ⚠ {i.issue} — <span className="muted">{i.fix}</span>
+              ⚠ {i.issue}
+              {i.fix && i.fix !== "—" ? <> — <span className="muted">{i.fix}</span></> : null}
             </div>
           ))}
         </>

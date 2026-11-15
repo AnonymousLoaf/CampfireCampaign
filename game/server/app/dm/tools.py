@@ -12,6 +12,7 @@ from ..rules import shop as shop_rules
 from ..rules import xp as xp_rules
 from ..rules.character import RulesError
 from ..rules.classes import ABILITIES, SKILLS
+from ..world import battlemap as bm
 from ..world import hexmap
 
 TOOLS: list[dict] = [
@@ -33,7 +34,11 @@ TOOLS: list[dict] = [
          "monsters": {"type": "array", "items": {"type": "object", "properties": {
              "name": {"type": "string", "description": "SRD monster name, e.g. 'Goblin', 'Wolf', 'Bandit', 'Skeleton'"},
              "count": {"type": "integer", "minimum": 1, "maximum": 8}}, "required": ["name", "count"]}},
-         "terrain": {"type": "string", "enum": ["road", "forest", "tavern", "cave", "dungeon", "ruins", "camp", "swamp"]}},
+         "terrain": {"type": "string", "enum": ["road", "forest", "tavern", "cave", "dungeon", "ruins", "camp", "swamp", "town"],
+                     "description": "The battle map; 'town' is a street or market square"},
+         "distance": {"type": "string", "enum": ["close", "near", "far"],
+                      "description": "How far apart the sides start: close = 10-20 ft (a standoff), near = 30-40 ft, "
+                                     "far = opposite ends of the map (default)"}},
          "required": ["monsters", "terrain"]}},
     {"name": "end_combat",
      "description": "End the current fight without a victory (the enemies flee or surrender, or the party escapes).",
@@ -197,7 +202,7 @@ class ToolBox:
         return (f"Roll requested: {s['name']} {label} (DC {dc}). Players roll their own dice — end your narration now by "
                 f"asking for this roll; you'll get the result next turn.")
 
-    def t_start_combat(self, monsters: list, terrain: str = "road") -> str:
+    def t_start_combat(self, monsters: list, terrain: str = "road", distance: str = "far") -> str:
         if self.ctx.encounter:
             return "Error: a fight is already in progress."
         specs = []
@@ -214,13 +219,34 @@ class ToolBox:
             raise RulesError("no living party members")
         enc, lines = combat.start(specs, terrain, party, self.ctx.settings.get("combat_mode", "side"),
                                   self.ctx.settings.get("death_rule", "standard"), seed=random.randrange(1 << 30),
-                                  ruleset=ruleset)
+                                  ruleset=ruleset, distance=distance if distance in bm.DISTANCES else "far")
         self.ctx.state["encounter"] = enc
         self.ctx.log_lines(lines)
         self.started_combat = True
-        foes = ", ".join(f"{t['name']} (AC {t['ac']}, {t['hp']} HP)" for t in enc["tokens"].values() if t["kind"] == "monster")
-        return (f"Combat started on a {enc['terrain']} map: {foes}. Who acts first: {enc['turn']}. Finish your narration "
-                f"setting the scene of the fight; the players will now act on the battle map.")
+        return self._combat_opening(enc, lines)
+
+    @staticmethod
+    def _combat_opening(enc: dict, lines: list[dict]) -> str:
+        """What the DM needs to narrate the opening of a fight truthfully: foes and their weapons, where everyone
+        stands, initiative, and every attack already resolved before the players' first move."""
+        foes = []
+        for t in enc["tokens"].values():
+            if t["kind"] != "monster":
+                continue
+            weapons = ", ".join(a["name"] for a in (t.get("actions") or [])[:3]) or "no listed attacks"
+            foes.append(f"{t['name']} (AC {t['ac']}, {t['hp']} HP; attacks: {weapons})")
+        pcs = [t for t in enc["tokens"].values() if t["kind"] == "pc"]
+        mons = [t for t in enc["tokens"].values() if t["kind"] == "monster"]
+        gap = min((bm.distance_ft((p["x"], p["y"]), (m["x"], m["y"])) for p in pcs for m in mons), default=0)
+        happened = [ln["text"] for ln in lines[1:]]
+        party_turn = enc["turn"].get("side") == "party" or (
+            enc["turn"].get("actor_id") and enc["tokens"].get(enc["turn"]["actor_id"], {}).get("kind") == "pc")
+        return (f"Combat started on a {enc['terrain']} map; the nearest enemy is {gap} ft from the party. "
+                f"Foes: {'; '.join(foes)}.\nWhat has happened so far, exactly as resolved by the game:\n- "
+                + "\n- ".join(happened)
+                + f"\nIt is now {'the party' if party_turn else 'the enemies'}' turn (round {enc['round']}). Narrate the "
+                  f"fight's opening to match these results exactly (same weapons, hits, misses and damage), then stop; "
+                  f"the players act on the battle map.")
 
     def t_end_combat(self, reason: str) -> str:
         if not self.ctx.encounter:

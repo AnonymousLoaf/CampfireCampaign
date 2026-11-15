@@ -13,6 +13,7 @@ const TERRAIN_STYLE: Record<string, { floor: string; floorAlt: string; wall: str
   ruins: { floor: "#7b7466", floorAlt: "#726b5e", wall: "#3d3932", obstacle: "#55504a", grid: "rgba(0,0,0,0.22)", difficult: "rgba(90,85,70,0.55)" },
   camp: { floor: "#6f7a45", floorAlt: "#7d6f4c", wall: "#3f3a28", obstacle: "#4a3b24", grid: "rgba(0,0,0,0.18)", difficult: "rgba(80,100,50,0.5)" },
   swamp: { floor: "#4a5a3a", floorAlt: "#435235", wall: "#252e1d", obstacle: "#2f3a24", grid: "rgba(0,0,0,0.22)", difficult: "rgba(40,70,70,0.6)" },
+  town: { floor: "#86796a", floorAlt: "#7d7062", wall: "#5a3e2b", obstacle: "#4a3a2a", grid: "rgba(0,0,0,0.2)", difficult: "rgba(150,100,60,0.45)" },
 };
 
 /** Aiming state for area spells and targeted class features. */
@@ -295,7 +296,7 @@ const PROP_LABEL: Record<string, string> = {
   table: "Table", bar: "Bar counter", barrel: "Barrel", tree: "Tree", boulder: "Boulder",
   stalagmite: "Stalagmite", cart: "Broken cart",
   pillar: "Pillar", statue: "Statue", chest: "Chest", altar: "Altar", tent: "Tent", campfire: "Campfire",
-  crate: "Crate", log: "Fallen log", dead_tree: "Dead tree",
+  crate: "Crate", log: "Fallen log", dead_tree: "Dead tree", stall: "Market stall", well: "Well",
 };
 
 /** Hash a square to a stable pseudo-random number in [0, 1). */
@@ -340,6 +341,24 @@ function decorateFloor(ctx: CanvasRenderingContext2D, terrain: string, px: numbe
     for (let i = 0; i < 3; i++) {
       const h = hash2(x * 3 + i, y * 7 - i);
       ctx.fillRect(px + cell * h, py + cell * hash2(y + i, x - i), Math.max(1, cell * 0.06), Math.max(1, cell * 0.06));
+    }
+  } else if (terrain === "town") {
+    // cobblestones: two offset rows of rounded stones
+    ctx.strokeStyle = "rgba(40,30,22,0.35)";
+    ctx.lineWidth = 1;
+    for (let row = 0; row < 2; row++) {
+      const yy = py + cell * (row * 0.5);
+      const off = (row + y) % 2 ? cell * 0.25 : 0;
+      for (let k = -1; k < 2; k++) {
+        const xx = px + off + k * cell * 0.5;
+        const x0 = Math.max(px, xx);
+        const x1 = Math.min(px + cell, xx + cell * 0.5);
+        if (x1 - x0 > 2) ctx.strokeRect(x0 + 0.5, yy + 0.5, x1 - x0 - 1, cell * 0.5 - 1);
+      }
+    }
+    if (r > 0.85) {
+      ctx.fillStyle = "rgba(255,255,255,0.06)";
+      ctx.fillRect(px + cell * 0.1, py + cell * 0.55, cell * 0.35, cell * 0.35);
     }
   } else if (terrain === "swamp") {
     if (r < 0.45) {
@@ -597,6 +616,50 @@ function drawProp(ctx: CanvasRenderingContext2D, kind: string, px: number, py: n
       ctx.beginPath();
       ctx.arc(cx, cy, cell * 0.24, 0, Math.PI * 2);
       ctx.fill();
+      break;
+    }
+    case "stall": {
+      // striped awning over a counter of goods; joins with the stall square beside it
+      const x0 = join.left ? px : px + cell * 0.06;
+      const x1 = join.right ? px + cell : px + cell * 0.94;
+      ctx.fillStyle = "#6b4a2a";
+      ctx.fillRect(x0, py + cell * 0.55, x1 - x0, cell * 0.33);
+      const stripes = 4;
+      for (let i = 0; i < stripes; i++) {
+        ctx.fillStyle = (i + (join.left ? 1 : 0)) % 2 ? "#e9dcc0" : "#a8322a";
+        ctx.fillRect(x0 + ((x1 - x0) / stripes) * i, py + cell * 0.12, (x1 - x0) / stripes + 0.5, cell * 0.4);
+      }
+      line("rgba(40,20,10,0.8)", Math.max(1, cell * 0.04));
+      ctx.strokeRect(x0, py + cell * 0.12, x1 - x0, cell * 0.4);
+      for (const [dx, c] of [[0.3, "#d9a03a"], [0.55, "#7fa83a"], [0.78, "#c0502a"]] as [number, string][]) {
+        ctx.fillStyle = c; // produce on the counter
+        ctx.beginPath();
+        ctx.arc(px + cell * dx, py + cell * 0.68, cell * 0.07, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      break;
+    }
+    case "well": {
+      ctx.fillStyle = "rgba(0,0,0,0.3)";
+      ctx.beginPath();
+      ctx.arc(cx + cell * 0.05, cy + cell * 0.07, cell * 0.4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#8d8780";
+      ctx.beginPath();
+      ctx.arc(cx, cy, cell * 0.4, 0, Math.PI * 2);
+      ctx.fill();
+      line("#3c3833", Math.max(1, cell * 0.05));
+      ctx.stroke();
+      ctx.fillStyle = "#1f3a4a";
+      ctx.beginPath();
+      ctx.arc(cx, cy, cell * 0.24, 0, Math.PI * 2);
+      ctx.fill();
+      line("rgba(170,210,230,0.35)", Math.max(1, cell * 0.03));
+      ctx.beginPath();
+      ctx.arc(cx - cell * 0.04, cy - cell * 0.04, cell * 0.12, Math.PI, Math.PI * 1.6);
+      ctx.stroke();
+      ctx.fillStyle = "#5a3a1e"; // winch beam
+      ctx.fillRect(px + cell * 0.08, cy - cell * 0.04, cell * 0.84, cell * 0.08);
       break;
     }
     case "crate": {
