@@ -2,6 +2,16 @@ import type { CharacterView, GameView } from "../../api/types";
 import { initials } from "../../util/format";
 import { LevelUpBadge } from "../LevelUpModal";
 
+/** "until Fri 18:00", "until they're back" — or null when the member isn't away. */
+export function awayLabel(until: string | null | undefined): string | null {
+  if (!until) return null;
+  const d = new Date(until);
+  if (Number.isNaN(d.getTime())) return "away";
+  if (d.getTime() < Date.now()) return null;
+  if (d.getFullYear() > new Date().getFullYear() + 5) return "away until they're back";
+  return `away until ${d.toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}`;
+}
+
 export function HpBar({ hp, max, temp = 0 }: { hp: number; max: number; temp?: number }) {
   const frac = max > 0 ? Math.max(0, Math.min(1, hp / max)) : 0;
   const cls = frac > 0.5 ? "good" : frac > 0.25 ? "warn" : "bad";
@@ -60,6 +70,7 @@ export default function PartyPanel({
       {chars.map(({ c, userId, name }) => {
         const st = memberStatus(view, userId);
         const isMe = c.id === view.me.character_id;
+        const away = awayLabel(view.members.find((m) => m.user_id === userId)?.away_until);
         return (
           <div key={c.id} className={`party-card ${selectedId === c.id ? "selected" : ""} ${c.down ? "down" : ""} ${c.dead ? "dead" : ""}`} onClick={() => onSelect(c.id)}>
             <div className="party-card-top">
@@ -93,6 +104,12 @@ export default function PartyPanel({
                     {x}
                   </span>
                 ))}
+                {away && (
+                  <span className="cond away" title="The AI plays this character cautiously while they're away">
+                    ✈ {away}
+                  </span>
+                )}
+                {!!c.exhaustion && c.exhaustion > 0 && <span className="cond bad">Exhaustion {c.exhaustion}</span>}
                 {c.inspiration && <span className="cond gold">Inspired</span>}
                 {c.spellcasting?.concentrating_on && <span className="cond conc" title="Concentrating">◎ {c.spellcasting.concentrating_on}</span>}
                 {c.pending_level_up &&
@@ -119,6 +136,11 @@ export default function PartyPanel({
           </div>
         );
       })}
+      {view.members.some((m) => m.role === "spectator") && (
+        <div className="spectator-list muted small">
+          👁 Watching: {view.members.filter((m) => m.role === "spectator").map((m) => m.display_name).join(", ")}
+        </div>
+      )}
     </div>
   );
 }

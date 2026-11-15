@@ -38,8 +38,18 @@ class DMError(RuntimeError):
     pass
 
 
+RECAP_SYSTEM = ("You summarise a D&D campaign's recent events for a player who was away. Write 3-6 short sentences of "
+                 "plain prose in past tense: what happened, where the party is now, and what is waiting on them. "
+                 "No headings, no lists, no invented details.")
+
+
 class OfflineEngine:
     name = "offline"
+
+    async def summarize(self, system: str, user: str) -> str:
+        items = [re.sub(r"^- \[[^\]]*\]\s*", "• ", l.strip()) for l in user.split("\n") if l.startswith("- ")]
+        items = [i if len(i) < 220 else i[:217] + "…" for i in items]
+        return "While you were away:\n" + "\n".join(items[-8:]) if items else "Nothing much happened while you were away."
 
     async def run(self, system: str, user: str, tools: list[dict], call_tool: ToolCaller, reason: str = "") -> EngineResult:
         t0 = time.monotonic()
@@ -109,6 +119,21 @@ class ApiKeyEngine:
     def __init__(self, api_key: str, model: str):
         self.api_key = api_key
         self.model = model
+
+    async def summarize(self, system: str, user: str) -> str:
+        import anthropic
+        client = anthropic.AsyncAnthropic(api_key=self.api_key, max_retries=2, timeout=300)
+        try:
+            resp = await client.messages.create(model=self.model, max_tokens=2000, system=system,
+                                                output_config={"effort": "low"},
+                                                messages=[{"role": "user", "content": user}])
+        except anthropic.APIStatusError as e:
+            raise DMError(f"Claude API error {e.status_code}") from e
+        except anthropic.APIConnectionError as e:
+            raise DMError("couldn't reach the Claude API") from e
+        if resp.stop_reason == "refusal":
+            raise DMError("the model declined to summarise")
+        return "\n\n".join(b.text for b in resp.content if b.type == "text").strip()
 
     async def run(self, system: str, user: str, tools: list[dict], call_tool: ToolCaller, reason: str = "") -> EngineResult:
         import anthropic
@@ -182,6 +207,25 @@ class ClaudeCodeEngine:
 
     def __init__(self, model: str):
         self.model = model
+
+    async def summarize(self, system: str, user: str) -> str:
+        from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
+        cwd = DATA_DIR / "claude_code_dm"
+        cwd.mkdir(parents=True, exist_ok=True)
+        opts = ClaudeAgentOptions(system_prompt=system, tools=[], allowed_tools=[], model=self.model, max_turns=1,
+                                  setting_sources=[], cwd=str(cwd), effort="low")
+        text = ""
+        try:
+            async for msg in query(prompt=user, options=opts):
+                if isinstance(msg, ResultMessage):
+                    if msg.is_error:
+                        raise DMError(f"Claude Code reported an error: {msg.result or msg.subtype}")
+                    text = (msg.result or "").strip()
+        except DMError:
+            raise
+        except Exception as e:
+            raise DMError(f"Claude Code failed: {e}") from e
+        return text
 
     async def run(self, system: str, user: str, tools: list[dict], call_tool: ToolCaller, reason: str = "") -> EngineResult:
         try:

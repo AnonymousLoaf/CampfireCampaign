@@ -15,6 +15,12 @@ import { CombatComposer, ExplorationComposer, RollComposer, ShopComposer, type A
 import WorldMap from "../maps/WorldMap";
 import BattleMap, { type Aim } from "../maps/BattleMap";
 import LevelUpModal from "../components/LevelUpModal";
+import AwayControl from "../components/game/AwayControl";
+import CatchUp from "../components/game/CatchUp";
+import StoryHistory from "../components/game/StoryHistory";
+import { useIsMobile } from "../util/useMedia";
+
+type MobileTab = "story" | "map" | "party" | "sheet";
 
 export default function GameScreen({ gameId, me }: { gameId: string; me: Me }) {
   const [view, setView] = useState<GameView | null>(null);
@@ -126,6 +132,25 @@ function GameLoaded({
   const [levelUpFor, setLevelUpFor] = useState<string | null>(null);
   const [armed, setArmedState] = useState<Armed | null>(null);
   const [aimPoint, setAimPoint] = useState<[number, number] | null>(null);
+  const isMobile = useIsMobile();
+  const [mobileTab, setMobileTab] = useState<MobileTab>("story");
+  const [feedTab, setFeedTab] = useState<"live" | "story">("live");
+  const spectator = view.me.role === "spectator";
+
+  // Mark the log read up to the newest entry (once per new entry).
+  const markedRef = useRef<string | number | null>(null);
+  const newestId = view.log.length ? view.log[view.log.length - 1].id : null;
+  const markSeen = (force = false) => {
+    if (newestId === null || !view.me.user_id) return;
+    if (!force && ((view.me.unseen_count ?? 0) <= 0 || markedRef.current === newestId)) return;
+    markedRef.current = newestId;
+    api
+      .seen(gameId, newestId)
+      .then(() => refresh())
+      .catch(() => {
+        markedRef.current = null;
+      });
+  };
   const setArmed = (a: Armed | null) => {
     setArmedState(a);
     setAimPoint(null);
@@ -140,13 +165,14 @@ function GameLoaded({
     if (!actingId || !controls.includes(actingId)) setActingId(view.me.character_id && controls.includes(view.me.character_id) ? view.me.character_id : controls[0] ?? null);
   }, [controls, actingId, view.me.character_id]);
 
-  // Auto-switch map tab when combat starts / ends.
+  // Auto-switch map tab when combat starts / ends (on phones, jump to the map when a fight starts).
   const hasEncounter = !!view.encounter;
   useEffect(() => {
     setMapTab(hasEncounter ? "battle" : "world");
     setSelectedTargetId(null);
     setTargetMenu(null);
-  }, [hasEncounter]);
+    if (hasEncounter && isMobile && !spectator) setMobileTab("map");
+  }, [hasEncounter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Open the shop automatically when a shop phase starts.
   const lastShopPhase = useRef<string | null>(null);
@@ -237,6 +263,13 @@ function GameLoaded({
   const canPickTravel = view.phase.type === "exploration" && (view.game.settings.input_mode !== "single" || !!view.me.is_speaker || (view.me.is_host && !view.game.settings.speaker_id));
 
   const composer = (() => {
+    if (spectator) {
+      return (
+        <div className="composer spectating">
+          <div className="muted">👁 You're spectating — you can follow everything, but only the players act.</div>
+        </div>
+      );
+    }
     switch (view.phase.type) {
       case "lobby":
         return (
@@ -296,29 +329,55 @@ function GameLoaded({
 
   const actingChar = actingId ? view.characters[actingId] : undefined;
 
-  return (
-    <GameContext.Provider value={ctx}>
-      <div className="game-screen">
-        <GameHeader onSettings={() => setModal("settings")} onTv={() => setModal("tv")} />
-        {view.phase.error && (
-          <div className="banner error">
-            The DM ran into a problem: {view.phase.error} {view.me.is_host ? "— use Retry DM in the header." : "— the host can retry."}
-          </div>
-        )}
-        <div className="game-grid">
-          <aside className="game-left">
-            <PartyPanel
-              view={view}
-              selectedId={viewedId}
-              onSelect={(id) => setViewedId(id)}
-              onNudge={view.me.is_host ? (uid) => void run(() => api.nudge(gameId, uid)) : undefined}
-              controls={controls}
-              onLevelUp={(id) => setLevelUpFor(id)}
-            />
-            <SheetTabs viewedId={viewedId} onViewed={setViewedId} />
-          </aside>
+  const partyEl = (
+    <>
+      <PartyPanel
+        view={view}
+        selectedId={viewedId}
+        onSelect={(id) => {
+          setViewedId(id);
+          if (isMobile) setMobileTab("sheet");
+        }}
+        onNudge={view.me.is_host ? (uid) => void run(() => api.nudge(gameId, uid)) : undefined}
+        controls={controls}
+        onLevelUp={(id) => setLevelUpFor(id)}
+      />
+      <AwayControl />
+    </>
+  );
+  const sheetEl = <SheetTabs viewedId={viewedId} onViewed={setViewedId} />;
+  const feedBusy = view.dm.busy || view.phase.type === "dm";
+  const feedEl = (
+    <div className="feed-wrap">
+      <div className="tabs small-tabs feed-tabs">
+        <button className={feedTab === "live" ? "active" : ""} onClick={() => setFeedTab("live")}>
+          Live
+          {(view.me.unseen_count ?? 0) > 0 && <span className="count">{view.me.unseen_count}</span>}
+        </button>
+        <button className={feedTab === "story" ? "active" : ""} onClick={() => setFeedTab("story")}>
+          Story so far
+        </button>
+      </div>
+      {feedTab === "live" ? (
+        <>
+          <CatchUp onMarkRead={() => markSeen(true)} />
+          <StoryFeed
+            log={view.log}
+            busy={feedBusy}
+            lastSeenId={view.me.last_seen_id ?? null}
+            onAtBottom={() => markSeen()}
+          />
+        </>
+      ) : (
+        <div className="story-feed">
+          <StoryHistory />
+        </div>
+      )}
+    </div>
+  );
 
-          <section className="game-center">
+  const mapEl = (
+    <section className="game-center">
             <div className="tabs map-tabs">
               <button className={mapTab === "world" ? "active" : ""} onClick={() => setMapTab("world")}>
                 🗺 World map
@@ -360,6 +419,7 @@ function GameLoaded({
                     targets={combat.canAct ? combat.targets : []}
                     actorTokenId={enc.turn.actor_id ?? combat.activeToken?.id ?? null}
                     selectedTargetId={selectedTargetId}
+                    interactive={!spectator}
                     onMove={(x, y) => void run(() => api.move(gameId, x, y, ctx.charParam))}
                     onTarget={(tok, at) => {
                       setSelectedTargetId(tok.id);
@@ -397,13 +457,63 @@ function GameLoaded({
                 </>
               )}
             </div>
-          </section>
+    </section>
+  );
 
-          <section className="game-right">
-            <StoryFeed log={view.log} busy={view.dm.busy || view.phase.type === "dm"} />
-            {composer}
-          </section>
-        </div>
+  const mobileTabs: { id: MobileTab; label: string; icon: string; badge?: number | string }[] = [
+    { id: "story", label: "Story", icon: "📜", badge: (view.me.unseen_count ?? 0) > 0 ? view.me.unseen_count : undefined },
+    { id: "map", label: enc ? "Battle" : "Map", icon: enc ? "⚔" : "🗺", badge: combat.canAct ? "!" : undefined },
+    { id: "party", label: "Party", icon: "👥" },
+    {
+      id: "sheet",
+      label: "Sheet",
+      icon: "📋",
+      badge: controls.some((id) => view.characters[id]?.pending_level_up) ? "✦" : undefined,
+    },
+  ];
+
+  return (
+    <GameContext.Provider value={ctx}>
+      <div className={`game-screen ${isMobile ? "mobile" : ""}`}>
+        <GameHeader onSettings={() => setModal("settings")} onTv={() => setModal("tv")} />
+        {view.phase.error && (
+          <div className="banner error">
+            The DM ran into a problem: {view.phase.error} {view.me.is_host ? "— use Retry DM in the header." : "— the host can retry."}
+          </div>
+        )}
+        {spectator && <div className="banner spectating">👁 Spectating — you can watch everything, but can't act.</div>}
+        {isMobile ? (
+          <>
+            <div className={`mobile-body mtab-${mobileTab}`}>
+              {mobileTab === "story" && <section className="game-right">{feedEl}</section>}
+              {mobileTab === "map" && mapEl}
+              {mobileTab === "party" && <aside className="game-left">{partyEl}</aside>}
+              {mobileTab === "sheet" && <aside className="game-left">{sheetEl}</aside>}
+            </div>
+            <div className="mobile-composer">{composer}</div>
+            <nav className="mobile-tabbar">
+              {mobileTabs.map((t) => (
+                <button key={t.id} className={mobileTab === t.id ? "active" : ""} onClick={() => setMobileTab(t.id)}>
+                  <span className="mt-icon">{t.icon}</span>
+                  <span className="mt-label">{t.label}</span>
+                  {t.badge !== undefined && <span className="mt-badge">{t.badge}</span>}
+                </button>
+              ))}
+            </nav>
+          </>
+        ) : (
+          <div className="game-grid">
+            <aside className="game-left">
+              {partyEl}
+              {sheetEl}
+            </aside>
+            {mapEl}
+            <section className="game-right">
+              {feedEl}
+              {composer}
+            </section>
+          </div>
+        )}
 
         {modal === "shop" && <ShopModal onClose={() => setModal(null)} />}
         {modal === "settings" && <HostSettingsModal onClose={() => setModal(null)} />}

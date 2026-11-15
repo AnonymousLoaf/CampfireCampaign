@@ -32,6 +32,19 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String)
     api_key_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
     api_key_last4: Mapped[str | None] = mapped_column(String, nullable=True)
+    email: Mapped[str | None] = mapped_column(String, nullable=True)
+    notify_email: Mapped[bool] = mapped_column(Boolean, default=False)
+    notify_push: Mapped[bool] = mapped_column(Boolean, default=True)
+    remind_minutes: Mapped[int] = mapped_column(Integer, default=60)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PushSubscription(Base):
+    __tablename__ = "push_subscriptions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    endpoint: Mapped[str] = mapped_column(Text, unique=True)
+    keys: Mapped[dict] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -86,8 +99,11 @@ class Membership(Base):
     game_id: Mapped[str] = mapped_column(ForeignKey("games.id", ondelete="CASCADE"), index=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     character_id: Mapped[str | None] = mapped_column(ForeignKey("characters.id", ondelete="SET NULL"), nullable=True)
-    role: Mapped[str] = mapped_column(String, default="player")  # host | player
+    role: Mapped[str] = mapped_column(String, default="player")  # host | player | spectator
     joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    away_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_seen_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reminded_phase_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class LogEntry(Base):

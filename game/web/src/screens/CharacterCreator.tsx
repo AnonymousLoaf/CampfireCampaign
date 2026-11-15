@@ -6,6 +6,7 @@ import {
   type AbilityMap,
   type AbilityRoll,
   type CreatorOptions,
+  type Ruleset,
   type Spell,
 } from "../api/types";
 import ErrorText, { useAction } from "../components/ErrorText";
@@ -18,7 +19,17 @@ const COLORS = ["#c0392b", "#d68910", "#b7950b", "#229954", "#17a589", "#2e86c1"
 
 const BASE: AbilityMap = { STR: 8, DEX: 8, CON: 8, INT: 8, WIS: 8, CHA: 8 };
 
+/** The class list a Magic Initiate feat uses: the server's `list`, else "Magic Initiate (Cleric)" → "cleric". */
+function magicInitiateList(feat: { name?: string | null; list?: string | null } | undefined | null): string | null {
+  const featName = feat?.name;
+  if (!featName || !/^magic initiate/i.test(featName)) return null;
+  if (feat?.list) return feat.list.trim().toLowerCase();
+  const m = /\(([^)]+)\)/.exec(featName);
+  return (m ? m[1] : "wizard").trim().toLowerCase();
+}
+
 export default function CharacterCreator({ onDone, onCancel }: { onDone: () => void; onCancel: () => void }) {
+  const [ruleset, setRuleset] = useState<Ruleset>("2014");
   const [opts, setOpts] = useState<CreatorOptions | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [step, setStep] = useState<Step>("Race");
@@ -46,16 +57,52 @@ export default function CharacterCreator({ onDone, onCancel }: { onDone: () => v
   const [fightingStyle, setFightingStyle] = useState("");
   const [expertise, setExpertise] = useState<string[]>([]);
   const [subclass, setSubclass] = useState("");
+  // M3 (2024) choices
+  const [bgAsiMode, setBgAsiMode] = useState<"21" | "111">("21");
+  const [bgPlus2, setBgPlus2] = useState<Ability | "">("");
+  const [bgPlus1, setBgPlus1] = useState<Ability | "">("");
+  const [masteries, setMasteries] = useState<string[]>([]);
+  const [miCantrips, setMiCantrips] = useState<string[]>([]);
+  const [miSpell, setMiSpell] = useState("");
 
   useEffect(() => {
+    setOpts(null);
+    setLoadErr(null);
     api
-      .creatorOptions()
+      .creatorOptions(ruleset)
       .then((o) => {
         setOpts(o);
         if (o.alignments.length && !o.alignments.includes("True Neutral")) setAlignment(o.alignments[0]);
       })
       .catch((e) => setLoadErr(e instanceof Error ? e.message : String(e)));
-  }, []);
+  }, [ruleset]);
+
+  const is2024 = ruleset === "2024";
+
+  /** Switching rulesets invalidates every choice made from the other ruleset's data. */
+  const switchRuleset = (r: Ruleset) => {
+    if (r === ruleset) return;
+    setRuleset(r);
+    setRace("");
+    setSubrace(null);
+    setCls("");
+    setBackground("");
+    setSkills([]);
+    setEquipment("");
+    setCantrips([]);
+    setSpells([]);
+    setAncestry("");
+    setBonusAbilities([]);
+    setFightingStyle("");
+    setExpertise([]);
+    setSubclass("");
+    setBgPlus2("");
+    setBgPlus1("");
+    setMasteries([]);
+    setMiCantrips([]);
+    setMiSpell("");
+    setStep("Race");
+  };
 
   const raceObj = opts?.races.find((r) => r.index === race) ?? null;
   const subObj = raceObj?.subraces.find((s) => s.index === subrace) ?? null;
@@ -68,14 +115,34 @@ export default function CharacterCreator({ onDone, onCancel }: { onDone: () => v
   const styles = clsObj?.fighting_styles ?? null;
   const expertiseCount = clsObj?.expertise_at_l1 ?? 0;
   const l1Subclasses = clsObj && clsObj.subclass_level === 1 ? clsObj.subclasses ?? [] : [];
+  // 2024
+  const bgAbilities = (is2024 ? bgObj?.ability_options : null) ?? [];
+  const masteryCount = is2024 ? clsObj?.weapon_mastery ?? 0 : 0;
+  const masteryOptions = clsObj?.mastery_options ?? [];
+  const miList = is2024 ? magicInitiateList(bgObj?.origin_feat) : null;
+  const miClass = miList ? opts?.classes.find((c) => c.index === miList || c.name.toLowerCase() === miList) ?? null : null;
+  const miCantripOptions = miClass?.spellcasting?.cantrips ?? [];
+  const miSpellOptions = (miClass?.spellcasting?.spells ?? []).filter((s) => s.level === 1);
 
   const steps = STEPS.filter((s) => s !== "Spells" || hasL1Spells);
+  const stepLabel = (s: Step) => (s === "Race" && is2024 ? "Species" : s);
 
-  /** Racial bonus for an ability, including Half-Elf style free choices. */
+  /** Background ability increases (2024): +2/+1 or +1/+1/+1 among the background's three abilities. */
+  const bgAsi: Partial<AbilityMap> = useMemo(() => {
+    if (!is2024 || bgAbilities.length === 0) return {};
+    if (bgAsiMode === "111") return Object.fromEntries(bgAbilities.map((a) => [a, 1]));
+    const out: Partial<AbilityMap> = {};
+    if (bgPlus2) out[bgPlus2] = 2;
+    if (bgPlus1 && bgPlus1 !== bgPlus2) out[bgPlus1] = 1;
+    return out;
+  }, [is2024, bgAbilities, bgAsiMode, bgPlus2, bgPlus1]);
+
+  /** Bonus for an ability: racial (2014), Half-Elf free choices, and background increases (2024). */
   const bonusFor = (k: Ability) =>
     (raceObj?.ability_bonuses[k] ?? 0) +
     (subObj?.ability_bonuses[k] ?? 0) +
-    (abilityChoices && bonusAbilities.includes(k) ? abilityChoices.amount : 0);
+    (abilityChoices && bonusAbilities.includes(k) ? abilityChoices.amount : 0) +
+    (bgAsi[k] ?? 0);
 
   const baseScores: AbilityMap | null = useMemo(() => {
     if (method === "pointbuy") return pointBuy;
@@ -90,7 +157,7 @@ export default function CharacterCreator({ onDone, onCancel }: { onDone: () => v
     for (const k of ABILITIES) out[k] += bonusFor(k);
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [baseScores, raceObj, subObj, bonusAbilities]);
+  }, [baseScores, raceObj, subObj, bonusAbilities, bgAsi]);
 
   const pointCost = (v: number) => opts?.point_buy.costs[String(v)] ?? 0;
   const pointsSpent = ABILITIES.reduce((s, k) => s + pointCost(pointBuy[k]), 0);
@@ -101,8 +168,8 @@ export default function CharacterCreator({ onDone, onCancel }: { onDone: () => v
   const valid = (s: Step): string | null => {
     switch (s) {
       case "Race":
-        if (!raceObj) return "Choose a race.";
-        if (raceObj.subraces.length > 0 && !subObj) return "Choose a subrace.";
+        if (!raceObj) return is2024 ? "Choose a species." : "Choose a race.";
+        if (raceObj.subraces.length > 0 && !subObj) return is2024 ? "Choose a lineage." : "Choose a subrace.";
         if (ancestries && ancestries.length && !ancestry) return "Choose a draconic ancestry.";
         if (abilityChoices && bonusAbilities.length !== abilityChoices.count)
           return `Choose ${abilityChoices.count} abilities to raise by ${abilityChoices.amount}.`;
@@ -113,7 +180,16 @@ export default function CharacterCreator({ onDone, onCancel }: { onDone: () => v
         if (l1Subclasses.length && !subclass) return "Choose a subclass.";
         return null;
       case "Background":
-        return bgObj ? null : "Choose a background.";
+        if (!bgObj) return "Choose a background.";
+        if (is2024 && bgAbilities.length) {
+          if (bgAsiMode === "21" && (!bgPlus2 || !bgPlus1 || bgPlus2 === bgPlus1))
+            return "Pick one ability for +2 and a different one for +1.";
+        }
+        if (miList) {
+          if (miCantrips.length !== Math.min(2, miCantripOptions.length)) return "Pick 2 Magic Initiate cantrips.";
+          if (miSpellOptions.length && !miSpell) return "Pick a Magic Initiate level-1 spell.";
+        }
+        return null;
       case "Abilities":
         if (method === "pointbuy" && pointsSpent > budget) return "You've spent more points than your budget.";
         if (method === "roll" && !roll) return "Roll your ability scores first.";
@@ -123,7 +199,10 @@ export default function CharacterCreator({ onDone, onCancel }: { onDone: () => v
         if (expertiseCount && expertise.length !== expertiseCount) return `Pick ${expertiseCount} skills for Expertise.`;
         return null;
       case "Equipment":
-        return equipment || (clsObj?.equipment_options.length ?? 0) === 0 ? null : "Choose your starting equipment.";
+        if (!(equipment || (clsObj?.equipment_options.length ?? 0) === 0)) return "Choose your starting equipment.";
+        if (masteryCount > 0 && masteries.length !== Math.min(masteryCount, masteryOptions.length))
+          return `Pick ${masteryCount} weapon masteries.`;
+        return null;
       case "Spells":
         if (!caster) return null;
         if (cantrips.length !== caster.cantrips_known) return `Pick ${caster.cantrips_known} cantrips.`;
@@ -168,6 +247,14 @@ export default function CharacterCreator({ onDone, onCancel }: { onDone: () => v
       ...(expertise.length ? { expertise } : {}),
       ...(abilityChoices && bonusAbilities.length ? { bonus_abilities: bonusAbilities } : {}),
       ...(ancestry ? { ancestry } : {}),
+      ...(is2024
+        ? {
+            ruleset,
+            background_asi: bgAsi,
+            masteries,
+            magic_initiate: miList ? { cantrips: miCantrips, spell: miSpell } : null,
+          }
+        : {}),
     });
     onDone();
   });
@@ -176,9 +263,16 @@ export default function CharacterCreator({ onDone, onCancel }: { onDone: () => v
     return (
       <div className="creator">
         <ErrorText error={loadErr} />
-        <button className="btn" onClick={onCancel}>
-          Back
-        </button>
+        <div className="row gap">
+          {ruleset !== "2014" && (
+            <button className="btn" onClick={() => switchRuleset("2014")}>
+              Use 2014 rules
+            </button>
+          )}
+          <button className="btn" onClick={onCancel}>
+            Back
+          </button>
+        </div>
       </div>
     );
   }
@@ -216,7 +310,7 @@ export default function CharacterCreator({ onDone, onCancel }: { onDone: () => v
               if (i <= idx || steps.slice(0, i).every((p) => !valid(p))) setStep(s);
             }}
           >
-            <span className="step-num">{i + 1}</span> {s}
+            <span className="step-num">{i + 1}</span> {stepLabel(s)}
           </button>
         ))}
       </nav>
@@ -225,7 +319,24 @@ export default function CharacterCreator({ onDone, onCancel }: { onDone: () => v
         <div className="creator-main">
           {step === "Race" && (
             <div>
-              <h2>Choose your race</h2>
+              <div className="ruleset-pick">
+                <span className="label">Rules</span>
+                <div className="seg">
+                  <button className={ruleset === "2014" ? "active" : ""} onClick={() => switchRuleset("2014")}>
+                    2014 (SRD 5.1)
+                  </button>
+                  <button className={ruleset === "2024" ? "active" : ""} onClick={() => switchRuleset("2024")}>
+                    2024 (SRD 5.2)
+                  </button>
+                </div>
+                <span className="muted small">
+                  {is2024
+                    ? "Ability increases come from your background; you pick weapon masteries and get an origin feat."
+                    : "Ability increases come from your race."}{" "}
+                  A character can only join games that use the same rules.
+                </span>
+              </div>
+              <h2>{is2024 ? "Choose your species" : "Choose your race"}</h2>
               <div className="choice-grid">
                 {opts.races.map((r) => (
                   <button
@@ -253,7 +364,7 @@ export default function CharacterCreator({ onDone, onCancel }: { onDone: () => v
               </div>
               {raceObj && raceObj.subraces.length > 0 && (
                 <>
-                  <h3>Subrace</h3>
+                  <h3>{is2024 ? "Lineage" : "Subrace"}</h3>
                   <div className="choice-grid">
                     {raceObj.subraces.map((s) => (
                       <button key={s.index} className={`choice ${subrace === s.index ? "selected" : ""}`} onClick={() => setSubrace(s.index)}>
@@ -399,17 +510,87 @@ export default function CharacterCreator({ onDone, onCancel }: { onDone: () => v
               <div className="choice-grid">
                 {opts.backgrounds.map((b) => (
                   <button key={b.index} className={`choice ${background === b.index ? "selected" : ""}`} onClick={() => {
+                    if (background !== b.index) {
+                      setBgPlus2("");
+                      setBgPlus1("");
+                      setMiCantrips([]);
+                      setMiSpell("");
+                    }
                     setBackground(b.index);
                     setSkills((prev) => prev.filter((s) => !b.skills.includes(s)));
                   }}>
                     <strong>{b.name}</strong>
                     <span className="muted small">
                       Skills: {b.skills.join(", ")} · {formatMoney(b.gold_cp)}
+                      {is2024 && b.ability_options?.length ? ` · ${b.ability_options.join(", ")}` : ""}
                     </span>
+                    {is2024 && b.origin_feat && <span className="small">Origin feat: {b.origin_feat.name}</span>}
                     <span className="small">{b.description}</span>
                   </button>
                 ))}
               </div>
+              {is2024 && bgObj && bgAbilities.length > 0 && (
+                <>
+                  <h3>Ability increases</h3>
+                  <div className="seg">
+                    <button className={bgAsiMode === "21" ? "active" : ""} onClick={() => setBgAsiMode("21")}>
+                      +2 and +1
+                    </button>
+                    <button className={bgAsiMode === "111" ? "active" : ""} onClick={() => setBgAsiMode("111")}>
+                      +1 to all three
+                    </button>
+                  </div>
+                  {bgAsiMode === "21" ? (
+                    <div className="stack-tight">
+                      <div className="row gap wrap">
+                        <span className="small muted asi-label">+2</span>
+                        {bgAbilities.map((a) => (
+                          <button key={a} className={`chip ${bgPlus2 === a ? "selected" : ""}`} onClick={() => setBgPlus2(a)}>
+                            {a}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="row gap wrap">
+                        <span className="small muted asi-label">+1</span>
+                        {bgAbilities.map((a) => (
+                          <button key={a} className={`chip ${bgPlus1 === a ? "selected" : ""}`} disabled={bgPlus2 === a} onClick={() => setBgPlus1(a)}>
+                            {a}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="small">+1 to {bgAbilities.join(", ")}.</p>
+                  )}
+                </>
+              )}
+              {is2024 && bgObj?.origin_feat && (
+                <div className="detail-box">
+                  <strong>Origin feat: {bgObj.origin_feat.name}.</strong> <span className="small">{bgObj.origin_feat.description}</span>
+                  {bgObj.tool && <div className="small muted">Tool proficiency: {bgObj.tool}</div>}
+                </div>
+              )}
+              {miList && (
+                <>
+                  <h3>
+                    Magic Initiate ({miClass?.name ?? miList}) — cantrips{" "}
+                    <span className="muted small">({miCantrips.length}/2)</span>
+                  </h3>
+                  {miCantripOptions.length ? (
+                    <SpellPicker list={miCantripOptions} chosen={miCantrips} max={2} onToggle={(i) => toggle(miCantrips, setMiCantrips, i, 2)} />
+                  ) : (
+                    <p className="muted small">No cantrip list available for this feat.</p>
+                  )}
+                  <h3>
+                    Magic Initiate — level-1 spell <span className="muted small">({miSpell ? 1 : 0}/1, cast once per long rest for free)</span>
+                  </h3>
+                  {miSpellOptions.length ? (
+                    <SpellPicker list={miSpellOptions} chosen={miSpell ? [miSpell] : []} max={1} onToggle={(i) => setMiSpell(miSpell === i ? "" : i)} />
+                  ) : (
+                    <p className="muted small">No level-1 spell list available for this feat.</p>
+                  )}
+                </>
+              )}
             </div>
           )}
 
@@ -587,6 +768,28 @@ export default function CharacterCreator({ onDone, onCancel }: { onDone: () => v
                 ))}
               </div>
               {bgObj && <p className="muted small">Your background also gives you {formatMoney(bgObj.gold_cp)}.</p>}
+              {masteryCount > 0 && (
+                <>
+                  <h3>
+                    Weapon mastery <span className="muted small">({masteries.length}/{masteryCount}) — special effects with these weapons</span>
+                  </h3>
+                  <div className="chip-grid">
+                    {masteryOptions.map((m) => {
+                      const picked = masteries.includes(m.weapon_key);
+                      return (
+                        <button
+                          key={m.weapon_key}
+                          className={`chip ${picked ? "selected" : ""}`}
+                          disabled={!picked && masteries.length >= masteryCount}
+                          onClick={() => toggle(masteries, setMasteries, m.weapon_key, masteryCount)}
+                        >
+                          {m.name} <span className="muted small">{m.mastery}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
             </div>
           )}
 
@@ -681,6 +884,19 @@ export default function CharacterCreator({ onDone, onCancel }: { onDone: () => v
                     </div>
                   )}
                   <div className="small">Equipment: {clsObj?.equipment_options.find((o) => o.id === equipment)?.items.join(", ")}</div>
+                  {is2024 && (
+                    <div className="small">
+                      {[
+                        "Rules: 2024",
+                        Object.keys(bgAsi).length && `Background: ${Object.entries(bgAsi).map(([k, v]) => `${k} +${v}`).join(", ")}`,
+                        bgObj?.origin_feat && `Origin feat: ${bgObj.origin_feat.name}`,
+                        masteries.length &&
+                          `Masteries: ${masteries.map((k) => masteryOptions.find((m) => m.weapon_key === k)?.name ?? k).join(", ")}`,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </div>
+                  )}
                   {caster && (
                     <div className="small">
                       Spells: {[...cantrips, ...spells].map((i) => [...caster.cantrips, ...caster.spells].find((s) => s.index === i)?.name ?? i).join(", ")}
@@ -697,6 +913,7 @@ export default function CharacterCreator({ onDone, onCancel }: { onDone: () => v
           <h3>Preview</h3>
           <div className="muted small">
             {raceObj?.name ?? "—"} {subObj ? `(${subObj.name})` : ""} {clsObj?.name ?? ""}
+            <span className={`ruleset-badge r${ruleset}`}>{ruleset}</span>
           </div>
           <div className="ability-grid">
             {ABILITIES.map((k) => (

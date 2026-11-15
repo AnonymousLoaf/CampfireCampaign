@@ -12,9 +12,18 @@ import re
 
 from ..rules import character as ch
 from ..rules import dice, srd
-from ..rules.classes import SPELL_EFFECTS, spell_target
 from ..rules.character import RulesError, mod
 from ..rules.classes import prof_bonus
+from ..rules.rulesets import R
+
+
+def FX(s: dict) -> dict:
+    """Spell effects for this caster's ruleset."""
+    return R(s).SPELL_EFFECTS
+
+
+def spell_target_for(s: dict, index: str) -> str:
+    return R(s).spell_target(index)
 from ..world import battlemap as bm
 
 MONSTER_COLORS = ["#b33a3a", "#8e3b8e", "#a35a1f", "#6b6b6b", "#3b6e8e", "#7a7a2e"]
@@ -28,11 +37,12 @@ def line(text: str, kind: str = "combat", **data) -> dict:
 # ── setup ───────────────────────────────────────────────────────────────────
 
 def start(specs: list[tuple[str, int]], terrain: str, party: list[tuple[str, dict]], mode: str = "side",
-          death_rule: str = "standard", seed: int | None = None) -> tuple[dict, list[dict]]:
+          death_rule: str = "standard", seed: int | None = None, ruleset: str = "2014") -> tuple[dict, list[dict]]:
     """party: [(character_id, sheet)] — living characters only."""
     rng = random.Random(seed)
     m = bm.generate(terrain if terrain in bm.TERRAINS else "road", seed)
     enc = {**m, "round": 1, "mode": mode if mode in ("side", "classic") else "side", "death_rule": death_rule,
+           "ruleset": ruleset,
            "tokens": {}, "order": [], "idx": 0, "turn": {"side": "party", "actor_id": None},
            "round_log": [], "custom_actions": [], "xp": 0, "outcome": None, "monsters_cr": []}
     taken: set = set()
@@ -47,7 +57,7 @@ def start(specs: list[tuple[str, int]], terrain: str, party: list[tuple[str, dic
     n = 0
     names = []
     for idx, count in specs:
-        rec = srd.monsters().get(idx)
+        rec = srd.monsters(ruleset).get(idx) or srd.monsters().get(idx)
         if not rec:
             continue
         spots = bm.deploy(m, count, "right", taken, rng)
@@ -78,8 +88,13 @@ def start(specs: list[tuple[str, int]], terrain: str, party: list[tuple[str, dic
     if enc["mode"] == "classic":
         rolls = []
         for t in enc["tokens"].values():
-            dmod = mod(chars[t["character_id"]]["abilities"]["DEX"]) if t["kind"] == "pc" else mod(t["abilities"]["DEX"])
-            r = dice.d20(dmod)
+            if t["kind"] == "pc":
+                ps = chars[t["character_id"]]
+                dmod = ch.initiative(ps)
+                adv = "advantage" if ch.has_feature(ps, "Feral Instinct") else "normal"
+            else:
+                dmod, adv = mod(t["abilities"]["DEX"]), "normal"
+            r = dice.d20(dmod, adv)
             rolls.append((r["total"], dmod, rng.random(), t["id"]))
             t["initiative"] = r["total"]
         rolls.sort(reverse=True)
@@ -89,7 +104,7 @@ def start(specs: list[tuple[str, int]], terrain: str, party: list[tuple[str, dic
         enc["turn"] = {"side": None, "actor_id": None}
         lines += _begin_actor(enc, chars)
     else:
-        pbest = max((mod(s["abilities"]["DEX"]) for _, s in pcs), default=0)
+        pbest = max((ch.initiative(s) for _, s in pcs), default=0)
         mbest = max((mod(t["abilities"]["DEX"]) for t in enc["tokens"].values() if t["kind"] == "monster"), default=0)
         pr, mr = dice.d20(pbest), dice.d20(mbest)
         first = "party" if pr["total"] >= mr["total"] else "monsters"
@@ -201,6 +216,9 @@ def _reset_budget(t: dict, chars: dict) -> None:
     t["disengaged"] = False
     t["sneak_used"] = False
     t["colossus_used"] = False
+    t["savage_used"] = False
+    t["divine_strike_used"] = False
+    t["cleave_used"] = False
     t["attacked"] = False
     t["reckless"] = False
     t["exposed"] = False
@@ -266,8 +284,36 @@ def end_concentration(enc: dict | None, chars: dict, caster: dict, quiet: bool =
                     t.pop("mark", None)
         if e.get("character") and e.get("condition") and e["character"] in chars:
             ch.remove_condition(chars[e["character"]], e["condition"])
-    name = srd.spells().get(conc["spell"], {}).get("name", conc["spell"])
+    name = srd.spells(ch.rs(s)).get(conc["spell"], {}).get("name") or srd.spells().get(conc["spell"], {}).get("name", conc["spell"])
     return [] if quiet else [line(f"{s['name']} loses concentration on {name}.", "combat")]
+
+
+def aura_bonus(enc: dict | None, chars: dict, t: dict) -> int:
+    """Aura of Protection: +CHA to saves for a paladin (6th+) and allies within 10 ft."""
+    if not enc or t["kind"] != "pc":
+        return 0
+    best = 0
+    for o in enc["tokens"].values():
+        if o["kind"] != "pc" or not alive(o, chars) or incapacitated(o, chars):
+            continue
+        s = chars[o["character_id"]]
+        if ch.has_feature(s, "Aura of Protection") and dist(o, t) <= 10:
+            best = max(best, max(1, mod(s["abilities"]["CHA"])))
+    return best
+
+
+def pc_save(enc: dict | None, chars: dict, t: dict, ability: str, dc: int) -> tuple[dict, bool]:
+    """A PC saving throw with Aura of Protection, Indomitable (reroll a failure) and Lucky."""
+    s = chars[t["character_id"]]
+    bonus = ch.save_bonus(s, ability) + aura_bonus(enc, chars, t)
+    r = _lucky(t, chars, dice.d20(bonus), bonus, "normal")
+    ok = r["total"] >= dc
+    if not ok and ch.has_feature(s, "Indomitable") and ch.uses_left(s, "Indomitable") > 0:
+        ch.use_feature(s, "Indomitable")
+        r = dice.d20(bonus + (s["level"] if ch.rs(s) == "2024" else 0))
+        r["indomitable"] = True
+        ok = r["total"] >= dc
+    return r, ok
 
 
 def _concentration_check(enc: dict, chars: dict, t: dict, damage: int) -> list[dict]:
@@ -276,10 +322,11 @@ def _concentration_check(enc: dict, chars: dict, t: dict, damage: int) -> list[d
         return []
     if s["hp"] <= 0:
         return end_concentration(enc, chars, t)
-    dc = max(10, damage // 2)
-    r = dice.d20(ch.save_bonus(s, "CON"))
-    if r["total"] >= dc:
-        return [line(f"{s['name']} keeps concentration (CON {r['total']} vs DC {dc}).", "roll")]
+    dc = min(30, max(10, damage // 2)) if ch.rs(s) == "2024" else max(10, damage // 2)
+    r, ok = pc_save(enc, chars, t, "CON", dc)
+    tag = " (Indomitable)" if r.get("indomitable") else ""
+    if ok:
+        return [line(f"{s['name']} keeps concentration (CON {r['total']} vs DC {dc}){tag}.", "roll")]
     return [line(f"{s['name']} fails a concentration save (CON {r['total']} vs DC {dc}).", "roll")] + \
         end_concentration(enc, chars, t)
 
@@ -372,6 +419,10 @@ def _advantage(enc: dict, chars: dict, att: dict, tgt: dict, ranged: bool, d: in
             dis = True
     if att.get("pack_tactics") and any(dist(a, tgt) <= 5 for a in allies(enc, att, chars)):
         adv = True
+    if att.get("vex") == tgt["id"]:  # Vex mastery
+        adv = True
+    if att.get("sapped"):  # Sap mastery
+        dis = True
     if adv and not dis:
         return "advantage"
     if dis and not adv:
@@ -381,7 +432,7 @@ def _advantage(enc: dict, chars: dict, att: dict, tgt: dict, ranged: bool, d: in
 
 def _lucky(att: dict, chars: dict, r: dict, bonus: int, adv: str) -> dict:
     s = sheet_of(att, chars)
-    if s and s["race"] == "halfling" and r["natural"] == 1:
+    if s and ch.race_info(s)["mechanics"].get("lucky") and r["natural"] == 1:
         r2 = dice.d20(bonus, adv)
         r2["lucky"] = True
         return r2
@@ -390,11 +441,18 @@ def _lucky(att: dict, chars: dict, r: dict, bonus: int, adv: str) -> dict:
 
 def resolve_attack(enc: dict, chars: dict, att: dict, tgt: dict, *, name: str, to_hit: int, dmg: str, dtype: str,
                    ranged: bool, normal: int | None, crit_on: int = 20, weapon: bool = True, spell: bool = False,
-                   finesse: bool = False, weapon_die: str | None = None) -> list[dict]:
+                   finesse: bool = False, weapon_die: str | None = None, mastery: str | None = None,
+                   ability_mod: int = 0, cleave: bool = False) -> list[dict]:
     d = dist(att, tgt)
     adv = _advantage(enc, chars, att, tgt, ranged, d, normal)
+    if att.get("vex") == tgt["id"]:
+        att.pop("vex", None)
+    att.pop("sapped", None)
     bonus = 0
     notes = []
+    s0 = sheet_of(att, chars)
+    if s0 and ch.rs(s0) == "2024" and s0.get("exhaustion"):
+        bonus -= 2 * int(s0["exhaustion"])
     if has_cond(att, chars, "Blessed"):
         b = dice.die(4)
         bonus += b
@@ -422,19 +480,39 @@ def resolve_attack(enc: dict, chars: dict, att: dict, tgt: dict, *, name: str, t
     head = f"{att['name']} attacks {tgt['name']} with {name}: {r['total']}{adv_txt} vs AC {ac}"
     data = {"attacker": att["id"], "target": tgt["id"], "roll": r, "ac": ac, "hit": hit, "crit": crit}
     if not hit:
-        return [line(head + " — miss.", "combat", **data)]
+        out = [line(head + " — miss.", "combat", **data)]
+        if mastery == "Graze" and ability_mod > 0 and weapon:
+            dealt, note, extra = apply_damage(enc, chars, tgt, ability_mod, dtype, att)
+            out.append(line(f"Graze: {tgt['name']} still takes {dealt} {dtype} damage." + _status_text(tgt["name"], note), "combat"))
+            out += extra
+        return out
     total = dice.damage(dmg, crit).total
     out_extra: list[dict] = []
     s = sheet_of(att, chars)
     melee_weapon = weapon and not ranged
     if s:
+        if weapon and ch.has_feat(s, "Savage Attacker") and not att.get("savage_used"):
+            second = dice.damage(dmg, crit).total  # roll the weapon's damage twice, keep the higher (once per turn)
+            if second > total:
+                notes.append(f"savage attacker {total}→{second}")
+                total = second
+            att["savage_used"] = True
         if att.get("raging") and melee_weapon:
-            total += 2
-            notes.append("+2 rage")
-        if crit and melee_weapon and s["race"] == "half-orc" and weapon_die:
-            extra = dice.roll(weapon_die).total
-            total += extra
-            notes.append(f"+{extra} savage")
+            rb = 2 if s["level"] < 9 else 3
+            total += rb
+            notes.append(f"+{rb} rage")
+        if crit and melee_weapon and weapon_die:
+            extra_dice = (1 if ch.race_info(s)["mechanics"].get("savage") else 0) + \
+                (1 if ch.has_feature(s, "Brutal Critical") else 0)
+            if extra_dice:
+                extra = sum(dice.roll(weapon_die).total for _ in range(extra_dice))
+                total += extra
+                notes.append(f"+{extra} brutal")
+        if weapon and ch.has_feature(s, "Divine Strike") and not att.get("divine_strike_used"):
+            ds = dice.damage("1d8" if s["level"] < 14 else "2d8", crit).total
+            total += ds
+            att["divine_strike_used"] = True
+            notes.append(f"+{ds} divine strike")
         mark = tgt.get("mark")
         if mark and mark.get("by") == att["id"] and (weapon or mark.get("any_attack")):
             m = dice.damage(mark["dice"], crit).total
@@ -481,8 +559,56 @@ def resolve_attack(enc: dict, chars: dict, att: dict, tgt: dict, *, name: str, t
     dealt, note, extra_lines = apply_damage(enc, chars, tgt, max(1, total), dtype, att)
     data["damage"] = dealt
     note_txt = f" ({', '.join(notes)})" if notes else ""
-    return [line(f"{head} — {'critical hit' if crit else 'hit'}! {dealt} {dtype} damage{note_txt}."
-                 + _status_text(tgt["name"], note), "combat", **data)] + out_extra + extra_lines
+    out = [line(f"{head} — {'critical hit' if crit else 'hit'}! {dealt} {dtype} damage{note_txt}."
+                + _status_text(tgt["name"], note), "combat", **data)] + out_extra + extra_lines
+    if mastery and weapon and s:
+        out += _mastery_effect(enc, chars, att, tgt, s, mastery, dealt, ability_mod, ranged, dtype, cleave)
+    return out
+
+
+def _mastery_effect(enc: dict, chars: dict, att: dict, tgt: dict, s: dict, mastery: str, dealt: int, ability_mod: int,
+                    ranged: bool, dtype: str, cleave: bool) -> list[dict]:
+    """2024 weapon mastery properties, applied after a hit."""
+    out: list[dict] = []
+    alive_t = alive(tgt, chars)
+    dc = 8 + ability_mod + prof_bonus(s["level"])
+    if mastery == "Vex" and dealt > 0 and alive_t:
+        att["vex"] = tgt["id"]
+    elif mastery == "Sap" and alive_t:
+        tgt["sapped"] = True
+        out.append(line(f"Sap: {tgt['name']} is thrown off balance (disadvantage on its next attack).", "combat"))
+    elif mastery == "Slow" and dealt > 0 and alive_t:
+        add_cond(tgt, chars, "Slowed")
+    elif mastery == "Topple" and alive_t and tgt["kind"] == "monster":
+        sv = dice.d20(save_bonus(tgt, chars, "CON"))
+        if sv["total"] < dc:
+            add_cond(tgt, chars, "Prone")
+            out.append(line(f"Topple: {tgt['name']} is knocked prone (CON {sv['total']} vs DC {dc}).", "combat"))
+    elif mastery == "Push" and alive_t and tgt["kind"] == "monster":
+        dx = (tgt["x"] > att["x"]) - (tgt["x"] < att["x"])
+        dy = (tgt["y"] > att["y"]) - (tgt["y"] < att["y"])
+        occ = occupied(enc, chars, tgt["id"])
+        moved = 0
+        for _ in range(2):
+            nx, ny = tgt["x"] + dx, tgt["y"] + dy
+            if not bm.passable(enc, nx, ny) or (nx, ny) in occ:
+                break
+            tgt["x"], tgt["y"] = nx, ny
+            moved += 5
+        if moved:
+            out.append(line(f"Push: {tgt['name']} is shoved {moved} ft back.", "combat"))
+    elif mastery == "Cleave" and not ranged and not cleave and not att.get("cleave_used"):
+        other = next((e for e in enemies(enc, att, chars) if e["id"] != tgt["id"] and dist(att, e) <= 5 and dist(tgt, e) <= 5), None)
+        if other:
+            att["cleave_used"] = True
+            a = next((x for x in ch.attacks(s) if x["kind"] == "melee" and x.get("mastery") == "Cleave"), None)
+            if a:
+                dmg = re.sub(r"[+-]\d+$", "", a["damage"]) if ability_mod > 0 else a["damage"]
+                out.append(line(f"Cleave: the swing carries on into {other['name']}!", "combat"))
+                out += resolve_attack(enc, chars, att, other, name=a["name"], to_hit=a["to_hit"], dmg=dmg,
+                                      dtype=a["damage_type"], ranged=False, normal=None, cleave=True,
+                                      finesse=a.get("finesse", False))
+    return out
 
 
 def _below_max(t: dict, chars: dict) -> bool:
@@ -514,7 +640,8 @@ def _weapon_attack(enc: dict, chars: dict, t: dict, a: dict, tgt: dict) -> list[
     wdie = re.match(r"\d*d\d+", a["damage"])
     return resolve_attack(enc, chars, t, tgt, name=a["name"], to_hit=a["to_hit"], dmg=a["damage"],
                           dtype=a["damage_type"], ranged=ranged, normal=normal, crit_on=crit_on,
-                          finesse=a.get("finesse", False), weapon_die=("1" + wdie.group(0)[wdie.group(0).index("d"):]) if wdie else None)
+                          finesse=a.get("finesse", False), weapon_die=("1" + wdie.group(0)[wdie.group(0).index("d"):]) if wdie else None,
+                          mastery=a.get("mastery"), ability_mod=a.get("ability_mod", 0))
 
 
 def attack(enc: dict, chars: dict, tid: str, attack_id: str, target_id: str) -> list[dict]:
@@ -611,8 +738,8 @@ def cast(enc: dict, chars: dict, tid: str, spell_index: str, target_id: str | No
     s = chars[t["character_id"]]
     if not ch.knows_spell(s, spell_index):
         raise RulesError(f"{s['name']} doesn't have that spell ready")
-    eff = SPELL_EFFECTS.get(spell_index)
-    rec = srd.spells().get(spell_index, {"name": spell_index, "level": 0})
+    eff = FX(s).get(spell_index)
+    rec = srd.spells(ch.rs(s)).get(spell_index) or srd.spells().get(spell_index, {"name": spell_index, "level": 0})
     if not eff:
         raise RulesError(f"{rec['name']} isn't resolved automatically — describe it as a custom action")
     use_bonus = bool(eff.get("bonus"))
@@ -628,7 +755,7 @@ def cast(enc: dict, chars: dict, tid: str, spell_index: str, target_id: str | No
     atk = ch.spell_attack(s) or 0
     rng_ft = eff.get("range", 60)
     kind = eff["kind"]
-    target_kind = spell_target(spell_index)
+    target_kind = spell_target_for(s, spell_index)
     tgt = enc["tokens"].get(target_id) if target_id else None
     point = (int(x), int(y)) if x is not None and y is not None else None
 
@@ -655,7 +782,13 @@ def cast(enc: dict, chars: dict, tid: str, spell_index: str, target_id: str | No
             raise RulesError("you can't teleport there")
     slot = 0
     if lvl > 0:
-        slot = ch.use_slot(s, int(slot_level or lvl) if (slot_level or lvl) >= lvl else lvl)
+        free_mi = spell_index in (s.get("spells") or {}).get("bonus_spells", []) and not s.get("mi_free_used") \
+            and ch.lowest_free_slot(s, lvl) is None
+        if free_mi:  # Magic Initiate: once per long rest without a slot
+            s["mi_free_used"] = True
+            slot = lvl
+        else:
+            slot = ch.use_slot(s, int(slot_level or lvl) if (slot_level or lvl) >= lvl else lvl)
     b["bonus" if use_bonus else "action"] = False
     if not use_bonus:
         b["attacks_left"] = 0
@@ -663,7 +796,13 @@ def cast(enc: dict, chars: dict, tid: str, spell_index: str, target_id: str | No
     name = rec["name"]
     out: list[dict] = [line(f"{t['name']} casts {name}" + (f" (level {slot})" if slot and slot > lvl else "") + ".", "combat")]
     conc_effects: list[dict] = []
-    sculpt = s["class"] == "wizard" and s.get("subclass") == "evocation" and rec.get("school") == "Evocation"
+    evocation = str(rec.get("school", "")).lower() == "evocation"
+    sculpt = s["class"] == "wizard" and str(s.get("subclass") or "") in ("evocation", "evoker") and evocation
+    evo_bonus = 0
+    if evocation and ch.has_feature(s, "Empowered Evocation"):
+        evo_bonus += max(0, mod(s["abilities"]["INT"]))
+    if ch.has_feature(s, "Elemental Affinity") and s.get("ancestry") and eff.get("type") == s["ancestry"]["damage_type"]:
+        evo_bonus += max(0, mod(s["abilities"]["CHA"]))
 
     def victims_for(cells: set) -> list[dict]:
         vs = [v for v in tokens_in(enc, chars, cells) if v["id"] != t["id"]]
@@ -682,10 +821,11 @@ def cast(enc: dict, chars: dict, tid: str, spell_index: str, target_id: str | No
             dmg = _cantrip_dice(dmg, s["level"])
         if eff.get("beams") and ch.has_feature(s, "Agonizing Blast") and smod:
             dmg = f"{dmg}{smod:+d}"
-        for _ in range(n):
+        for i in range(n):
             if not alive(tgt, chars):
                 break
-            res = resolve_attack(enc, chars, t, tgt, name=name, to_hit=atk, dmg=dmg, dtype=eff["type"],
+            d_i = f"{dmg}{evo_bonus:+d}" if (i == 0 and evo_bonus) else dmg
+            res = resolve_attack(enc, chars, t, tgt, name=name, to_hit=atk, dmg=d_i, dtype=eff["type"],
                                  ranged=rng_ft > 5, normal=rng_ft, weapon=False, spell=True)
             out += res
             hitd = res[0]["data"] or {}
@@ -702,7 +842,7 @@ def cast(enc: dict, chars: dict, tid: str, spell_index: str, target_id: str | No
             out += start_concentration(enc, chars, t, spell_index, [])
     elif kind == "auto":
         darts = eff["darts"] + up
-        total = sum(dice.roll("1d4+1").total for _ in range(darts))
+        total = sum(dice.roll("1d4+1").total for _ in range(darts)) + evo_bonus
         dealt, note, extra = apply_damage(enc, chars, tgt, total, eff["type"], t)
         out.append(line(f"{darts} darts strike {tgt['name']} for {dealt} force damage." + _status_text(tgt["name"], note),
                         "combat", attacker=t["id"], target=tgt["id"], damage=dealt))
@@ -732,11 +872,15 @@ def cast(enc: dict, chars: dict, tid: str, spell_index: str, target_id: str | No
             dmg = _upcast(eff["dice"], eff.get("upcast"), up)
             if eff.get("cantrip"):
                 dmg = _cantrip_dice(dmg, s["level"])
-            rolled = dice.roll(dmg).total
+            rolled = dice.roll(dmg).total + evo_bonus
+            potent = eff.get("cantrip") and ch.has_feature(s, "Potent Cantrip")
             for v in vs:
-                sv = dice.d20(save_bonus(v, chars, eff["save"]))
-                ok = sv["total"] >= dc
-                amount = (rolled // 2 if eff.get("half") else 0) if ok else rolled
+                if v["kind"] == "pc":
+                    sv, ok = pc_save(enc, chars, v, eff["save"], dc)
+                else:
+                    sv = dice.d20(save_bonus(v, chars, eff["save"]))
+                    ok = sv["total"] >= dc
+                amount = (rolled // 2 if (eff.get("half") or potent) else 0) if ok else rolled
                 dealt, note, extra = apply_damage(enc, chars, v, amount, eff["type"], t) if amount else (0, "", [])
                 out.append(line(f"{v['name']}: {eff['save']} save {sv['total']} vs DC {dc} — {'saved' if ok else 'failed'}, "
                                 f"{dealt} {eff['type']} damage." + _status_text(v["name"], note), "combat",
@@ -771,10 +915,14 @@ def cast(enc: dict, chars: dict, tid: str, spell_index: str, target_id: str | No
             targets = [tgt] + [a for a in pool if a["id"] != tgt["id"]][: eff["multi"] - 1]
         for a in targets:
             amount = dice.roll(_upcast(eff["dice"], eff.get("upcast"), up)).total + smod
-            if s["class"] == "cleric" and s.get("subclass") == "life":
+            if s["class"] == "cleric" and str(s.get("subclass") or "") == "life":
                 amount += 2 + max(1, slot)
             healed = ch.heal(chars[a["character_id"]], max(1, amount))
             out.append(line(f"{a['name']} regains {healed} HP.", "combat", target=a["id"], heal=healed))
+        if ch.has_feature(s, "Blessed Healer") and any(a["id"] != t["id"] for a in targets) and slot:
+            bh = ch.heal(s, 2 + slot)
+            if bh:
+                out.append(line(f"Blessed Healer: {t['name']} regains {bh} HP.", "combat"))
     elif kind == "buff":
         targets = [tgt]
         if eff.get("multi"):
@@ -986,7 +1134,7 @@ def feature(enc: dict, chars: dict, tid: str, fid: str, target_id: str | None = 
             sv = dice.d20(save_bonus(e, chars, "WIS"))
             if sv["total"] >= dc:
                 out.append(line(f"{e['name']} resists the turning (WIS {sv['total']} vs DC {dc}).", "combat"))
-            elif s["level"] >= 5 and (e.get("cr") or 0) <= 0.5:
+            elif s["level"] >= 5 and (e.get("cr") or 0) <= (1 if s["level"] >= 8 else 0.5):
                 e["hp"] = 0
                 out.append(line(f"{e['name']} crumbles to dust (Destroy Undead)!", "combat"))
             else:
@@ -1022,7 +1170,11 @@ def feature(enc: dict, chars: dict, tid: str, fid: str, target_id: str | None = 
         cells = area_cells(enc, pos(t), (int(x), int(y)), area, True)
         save = "CON" if anc["damage_type"] in ("poison", "cold") else "DEX"
         dc = 8 + mod(s["abilities"]["CON"]) + prof_bonus(s["level"])
-        rolled = dice.roll("2d6").total
+        if ch.rs(s) == "2024":
+            bd = "1d10" if s["level"] < 5 else "2d10" if s["level"] < 11 else "3d10"
+        else:
+            bd = "2d6" if s["level"] < 6 else "3d6" if s["level"] < 11 else "4d6"
+        rolled = dice.roll(bd).total
         out.append(line(f"{t['name']} breathes {anc['damage_type']}!", "combat"))
         for v in [v for v in tokens_in(enc, chars, cells) if v["id"] != t["id"]]:
             sv = dice.d20(save_bonus(v, chars, save))
@@ -1186,8 +1338,9 @@ def _death_save(enc: dict, chars: dict, t: dict) -> list[dict]:
     s = chars[t["character_id"]]
     if s["hp"] > 0 or s.get("dead") or "Stable" in s["conditions"] or enc.get("death_rule") == "heroic":
         return []
-    r = dice.d20()
-    r = _lucky(t, chars, r, 0, "normal")
+    aura = aura_bonus(enc, chars, t)
+    r = dice.d20(aura)
+    r = _lucky(t, chars, r, aura, "normal")
     ds = s.setdefault("death_saves", {"success": 0, "fail": 0})
     if r["natural"] == 20:
         ch.heal(s, 1)
@@ -1361,13 +1514,14 @@ def auto_turn(enc: dict, chars: dict, tid: str, policy: str) -> list[dict]:
             foe = min(foes, key=lambda e: dist(t, e))
             melee = [a for a in atks if a["kind"] == "melee" and a["id"] != "unarmed"] or [a for a in atks if a["kind"] == "melee"]
             ranged = [a for a in atks if a["kind"] == "ranged" and (not a.get("ammo") or ch.find_inv_key(s, a["ammo"]))]
-            cantrip = next((c for c in (s.get("spells") or {}).get("cantrips", [])
-                            if SPELL_EFFECTS.get(c, {}).get("kind") in ("attack", "save") and not SPELL_EFFECTS[c].get("area")), None)
+            fx = FX(s)
+            cantrip = next((c for c in ch.all_cantrips(s)
+                            if fx.get(c, {}).get("kind") in ("attack", "save") and not fx[c].get("area")), None)
             d = dist(t, foe)
             try:
                 if ranged and 5 < d <= (ranged[0]["long_range_ft"] or ranged[0]["range_ft"]):
                     out += attack(enc, chars, tid, ranged[0]["id"], foe["id"])
-                elif cantrip and 5 < d <= SPELL_EFFECTS[cantrip]["range"] and ch.spell_ability(s) and \
+                elif cantrip and 5 < d <= fx[cantrip].get("range", 60) and ch.spell_ability(s) and \
                         mod(s["abilities"][ch.spell_ability(s)]) >= mod(s["abilities"]["STR"]):
                     out += cast(enc, chars, tid, cantrip, foe["id"], None)
                 elif melee:
@@ -1397,13 +1551,14 @@ def auto_turn(enc: dict, chars: dict, tid: str, policy: str) -> list[dict]:
 
 def _ai_heal(enc: dict, chars: dict, t: dict, s: dict) -> list[dict]:
     """If an ally is down or badly hurt and we can heal, do it."""
-    heals = [i for i in ch.ready_spells(s) if SPELL_EFFECTS.get(i, {}).get("kind") == "heal" and "multi" not in SPELL_EFFECTS[i]]
+    fx = FX(s)
+    heals = [i for i in ch.ready_spells(s) if fx.get(i, {}).get("kind") == "heal" and "multi" not in fx[i]]
     if not heals or not ch.lowest_free_slot(s):
         return []
     hurt = [a for a in [o for o in enc["tokens"].values() if o["kind"] == "pc" and present(o, chars)]
             if chars[a["character_id"]]["hp"] <= chars[a["character_id"]]["hp_max"] // 3]
-    for sp in sorted(heals, key=lambda i: -SPELL_EFFECTS[i].get("range", 5)):
-        eff = SPELL_EFFECTS[sp]
+    for sp in sorted(heals, key=lambda i: -fx[i].get("range", 5)):
+        eff = fx[sp]
         for a in hurt:
             if dist(t, a) <= eff["range"]:
                 bonus = bool(eff.get("bonus"))
@@ -1491,7 +1646,11 @@ def view(enc: dict, chars: dict, controls: list[str], prefer: str | None = None)
         reach = [[x, y] for (x, y) in reachable_for(enc, mine, chars) if (x, y) != pos(t)]
         s = chars[t["character_id"]]
         atks = ch.attacks(s)
-        known = [i for i in (s.get("spells") or {}).get("cantrips", []) + ch.ready_spells(s) if i in SPELL_EFFECTS]
+        SPELL_EFFECTS = FX(s)  # noqa: N806 — this caster's ruleset
+
+        def spell_target(i: str) -> str:
+            return spell_target_for(s, i)
+        known = [i for i in ch.all_cantrips(s) + ch.ready_spells(s) if i in SPELL_EFFECTS]
         can_attack = budget["action"] or budget.get("attacks_left", 0) > 0
         feats = [a for a in ch.actions(s)] + ([{"id": "spiritual_weapon", "target": "enemy", "range_ft": 60}]
                                               if t.get("spiritual_weapon") else [])

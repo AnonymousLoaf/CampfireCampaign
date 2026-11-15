@@ -319,3 +319,52 @@ New terrains `dungeon`, `ruins`, `camp`, `swamp` (plus road/forest/tavern/cave).
 ## Loot
 
 Victories roll treasure by monster CR (coins, sometimes a potion or a common/uncommon magic item depending on magic level). It goes to the party's characters automatically and is logged; the DM narrates it.
+
+---
+
+# M3 additions
+
+## Rulesets (2014 and 2024) and levels 1-10
+
+- `GameSettings.ruleset`: `"2014"` | `"2024"` (default "2014"). `starting_level` range is now 1..10. `MAX_LEVEL` = 10.
+- Characters carry a ruleset fixed at creation (`CharacterView.ruleset`); a character can only join a game with the same ruleset.
+- `GET /rules/creator?ruleset=2024` returns the same shape as 2014, with these differences:
+  - `races` = the 2024 **species** (no `ability_bonuses`; `subraces` hold lineages/legacies where the SRD has them; `ancestries` for Dragonborn as before).
+  - `backgrounds[]` gain `ability_options: [ab, ab, ab]` (the background's three abilities), `origin_feat: {name, description}`, `tool: str|null`.
+  - `classes[]` gain `weapon_mastery: n` (weapons you master at level 1) and `mastery_options: [{weapon_key, name, mastery}]`; `subclass_level` is 3 for every class; `spellcasting.prepares` is true for every caster (2024 casters all prepare from a table: `spells_at_l1` is the number prepared at level 1).
+  - `feats: [{name, description, category: "origin"|"general"|"fighting_style"}]` (SRD 5.2 feats).
+- `CreateCharacter` gains (2024 only): `ruleset: "2024"`, `background_asi: {AB: 2, AB: 1}` or `{AB: 1, AB: 1, AB: 1}` (only the background's abilities), `masteries: [weapon_key]`, `magic_initiate: null | {cantrips: [index, index], spell: index}` (when the background's origin feat is Magic Initiate). 2014 characters ignore these.
+- `CharacterView` gains `ruleset`, `feats: [{name, description}]`, `masteries: [{weapon_key, name, mastery, description}]`, `exhaustion: n` (2024: −2 to d20 tests per level).
+- `attacks[]` gain `mastery: str|null` — the weapon's mastery property if the character has mastered it. Combat applies it automatically: **Vex** (advantage on your next attack against that target), **Topple** (CON save or prone), **Sap** (target has disadvantage on its next attack), **Slow** (−10 ft speed), **Push** (pushed 10 ft away), **Graze** (miss still deals your ability modifier), **Cleave** (one extra attack against a different adjacent enemy, once per turn), **Nick** (noted; no extra effect yet).
+- `pending_level_up` gains `feat_options: null | [{name, description}]` (at ASI levels: choose an ASI **or** a feat) and `masteries: n` + `mastery_options` (new weapon masteries to pick). Level-up body gains `feat?: name`, `masteries?: [weapon_key]`.
+
+## Notifications
+
+`Me` gains `email: str|null`, `notify: {email: bool, push: bool, remind_minutes: n}`.
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| PUT | `/me/notifications` | `{email?, notify_email?, notify_push?, remind_minutes?}` | `Me` |
+| GET | `/push/key` | – | `{public_key}` (VAPID, base64url) |
+| POST | `/push/subscribe` | `{subscription}` (the browser PushSubscription JSON) | ok |
+| DELETE | `/push/subscribe` | `{endpoint}` | ok |
+| POST | `/push/test` | – | ok — sends a test notification to my devices |
+
+`GET /meta` gains `email_available: bool` (SMTP configured on the server), `push_available: bool`.
+
+The server notifies a player (push and/or email, per their settings) when: a phase opens that waits on them ("Your move in …"), the DM narrates while they're waiting, the host nudges them, and `remind_minutes` before their deadline if they still haven't acted. Nothing is sent during a live session. Payload: `{title, body, url}` where `url` is `/#/game/{id}`. The frontend registers a service worker at `/sw.js` (shows the notification; clicking focuses or opens `url`).
+
+## Vacation mode
+
+`POST /games/{id}/away {until: iso|null}` — while away, the game doesn't wait for that player: their character is played cautiously by the AI each round, whatever the timeout policy. `members[]` gain `away_until: str|null`.
+
+## Spectators
+
+`POST /games/join {invite_code, spectate: true}` (no `character_id`) joins as a spectator (up to 10, not counted in max players). `members[].role` can be `"spectator"`. `me.role` is added. Spectators get the full view but can't act.
+
+## History and catch-up
+
+- `GET /games/{id}/log?before_id=&limit=50&kinds=narration,event` → `{entries: [LogEntry], has_more}` (newest first) for the Story tab / infinite scroll.
+- `GameView.me` gains `last_seen_id: n|null` and `unseen_count: n`; `POST /games/{id}/seen {log_id}` records how far I've read.
+- `POST /games/{id}/recap` → `{text}`: the DM summarises what happened since my `last_seen_id` in a few sentences (uses the game's DM engine; the offline DM returns a bullet list). Not added to the log.
+- Submissions gain `edited: bool` and `updated_at`; `submissions_visible[]` include them.

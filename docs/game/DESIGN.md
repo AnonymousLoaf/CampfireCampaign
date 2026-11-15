@@ -280,8 +280,8 @@ Scope:
 All 12 SRD classes and races to level 5, player-confirmed level-ups, spell preparation and spellbooks, area spells with on-map aiming, concentration, reactions and opportunity attacks, class features in combat, four more battle maps, rests by vote with the rest-rules setting active, haggling, alchemist/magic/temple/inn shops, loot by CR.
 *Moved to M3:* the 2024 ruleset (needs the SRD 5.2 dataset built and per-edition class tables) and levels above 5.
 
-### M3 — Async polish
-Email and web-push notifications, vacation mode, mobile layout, game history/replay, spectators, reconnect and edit-history handling.
+### M3 — Async polish ✅ built
+Email and web-push notifications with deadline reminders, vacation mode, phone layout, story history with catch-up recaps, spectators, edited-action markers — plus the 2024 rules (SRD 5.2) and levels 6-10 for both rulesets.
 
 ### M4 — Atmosphere
 Scene backgrounds and sky canvas from the display companion, sound effects, spoken narration (reuse `tts.py`), dice animations, character portraits.

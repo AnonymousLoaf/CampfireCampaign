@@ -127,7 +127,11 @@ export function ExplorationComposer({
           {mine ? "Update action" : "Submit action"}
         </button>
       </div>
-      {mine && <div className="ok-text small">✓ Your action is in. You can change it until the round resolves.</div>}
+      {mine && (
+        <div className="ok-text small">
+          ✓ Your action is in{mine.edited ? " (edited — others see that it changed)" : ""}. You can change it until the round resolves.
+        </div>
+      )}
     </div>
   );
 }
@@ -147,6 +151,11 @@ function Others() {
             {s.text || <em className="muted">{s.rest ? "(rest)" : "(travel only)"}</em>}
             {s.travel_to && <span className="muted small"> · 🧭 travel</span>}
             {s.rest && <span className="muted small"> · {s.rest === "short" ? "☕ short rest" : "🌙 long rest"}</span>}
+            {s.edited && (
+              <span className="edited-tag" title={s.updated_at ? `Edited ${new Date(s.updated_at).toLocaleString()}` : "Edited"}>
+                edited
+              </span>
+            )}
           </div>
         );
       })}

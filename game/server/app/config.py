@@ -11,6 +11,7 @@ REPO_DIR = GAME_DIR.parent
 
 SKILL_DIR = REPO_DIR / "skills" / "dnd"
 SRD_PATH = SKILL_DIR / "data" / "dnd5e_srd.json"
+SRD_2024_PATH = SERVER_DIR / "rulesdata" / "dnd5e_srd_2024.json"  # built with skills/dnd/scripts/build_srd.py --ruleset 2024
 SKILL_SCRIPTS = SKILL_DIR / "scripts"
 
 DATA_DIR = Path(os.environ.get("GAME_DATA_DIR", SERVER_DIR / "data"))

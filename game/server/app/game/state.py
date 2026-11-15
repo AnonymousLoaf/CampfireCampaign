@@ -30,12 +30,12 @@ ENUMS = {
     "tone": {"heroic", "gritty", "dark", "lighthearted"}, "length": {"one_shot", "short", "open"},
     "difficulty": {"story", "normal", "hard", "deadly"}, "death_rule": {"heroic", "standard", "permadeath"},
     "rest_rule": {"standard", "gritty", "epic"}, "leveling": {"xp", "milestone"},
-    "magic_level": {"low", "standard", "high"}, "economy": {"scarce", "standard", "rich"}, "ruleset": {"2014"},
+    "magic_level": {"low", "standard", "high"}, "economy": {"scarce", "standard", "rich"}, "ruleset": {"2014", "2024"},
     "rolls": {"players", "auto"}, "combat_mode": {"side", "classic"}, "narration_length": {"short", "medium", "long"},
     "timeout_policy": {"ai", "skip", "pause"}, "input_mode": {"individual", "single"},
     "dm_engine": {"offline", "claude_code", "api_key"}, "dm_model": {"claude-opus-5-5", "claude-sonnet-5-5"},
 }
-RANGES = {"starting_level": (1, 5), "max_players": (1, 6), "sell_rate": (0.1, 1.0),
+RANGES = {"starting_level": (1, 10), "max_players": (1, 6), "sell_rate": (0.1, 1.0),
           "round_timer_minutes": (5, 7200), "combat_timer_minutes": (5, 7200), "live_timer_minutes": (1, 60)}
 LIVE_EDITABLE = {"round_timer_minutes", "combat_timer_minutes", "live", "live_timer_minutes", "input_mode", "speaker_id",
                  "timeout_policy", "rolls", "combat_mode", "narration_length", "dm_engine", "dm_model",
@@ -177,6 +177,19 @@ class Ctx:
                 return cid
         return None
 
+    def is_away(self, m: Membership) -> bool:
+        if not m.away_until:
+            return False
+        au = m.away_until if m.away_until.tzinfo else m.away_until.replace(tzinfo=timezone.utc)
+        return au > now()
+
+    def away_chars(self) -> list[str]:
+        """Characters whose players are on vacation (the AI plays them)."""
+        if self.settings.get("input_mode") == "single":
+            return []
+        return [m.character_id for m in self.members if m.character_id and self.is_away(m)
+                and m.character_id in self.chars and not self.chars[m.character_id].get("dead")]
+
     def required_users(self) -> list[str]:
         """Who must act for the current phase to resolve early."""
         if self.settings.get("input_mode") == "single":
@@ -184,7 +197,7 @@ class Ctx:
         out = []
         for m in self.members:
             s = self.chars.get(m.character_id or "")
-            if s and not s.get("dead"):
+            if s and not s.get("dead") and not self.is_away(m):
                 out.append(m.user_id)
         return out
 
@@ -223,11 +236,14 @@ class Ctx:
             pending = [r for r in p.get("pending_rolls", []) if r.get("result") is None]
             if self.settings.get("input_mode") == "single":
                 return [self.speaker_id()] if pending else []
-            return sorted({r["user_id"] for r in pending})
+            return sorted({r["user_id"] for r in pending if r["user_id"] in req})
         if t == "combat" and self.encounter:
             enc = self.encounter
             out = []
+            away = set(self.away_chars())
             for cid, _ in self.living_party():
+                if cid in away:
+                    continue
                 if combat.can_act(enc, f"pc-{cid}", self.chars):
                     m = self.member_for_char(cid)
                     who = self.speaker_id() if self.settings.get("input_mode") == "single" else (m.user_id if m else None)
@@ -278,7 +294,16 @@ def build_view(db: Session, ctx: Ctx, uid: str | None, tv: bool = False) -> dict
     for m in ctx.members:
         acted = m.user_id not in waiting and p.get("type") in ("exploration", "shop", "roll", "combat")
         members.append({"user_id": m.user_id, "display_name": ctx.user_name(m.user_id), "character_id": m.character_id,
-                        "role": m.role, "has_acted": acted, "ready": m.user_id in p.get("ready", [])})
+                        "role": m.role, "has_acted": acted, "ready": m.user_id in p.get("ready", []),
+                        "away_until": iso(m.away_until) if ctx.is_away(m) else None})
+    last_seen = my_member.last_seen_id if my_member else None
+    unseen = 0
+    if my_member:
+        from sqlalchemy import func
+        q = select(func.count(LogEntry.id)).where(LogEntry.game_id == game.id, LogEntry.kind.in_(["narration", "event"]))
+        if last_seen:
+            q = q.where(LogEntry.id > last_seen)
+        unseen = db.scalar(q) or 0
     chars = {cid: ch.view(cid, ctx.char_rows[cid].owner_id, game.id, s) for cid, s in ctx.chars.items()}
     enc0 = ctx.encounter
     if enc0:  # combat-only actions (e.g. an active Spiritual Weapon)
@@ -293,7 +318,8 @@ def build_view(db: Session, ctx: Ctx, uid: str | None, tv: bool = False) -> dict
         "id": p.get("id", 0), "type": p.get("type", "lobby"), "prompt": p.get("prompt"),
         "opened_at": p.get("opened_at"), "deadline": p.get("deadline"), "waiting_on": waiting,
         "my_submission": subs.get(uid) if uid else None,
-        "submissions_visible": [{"user_id": k, "text": v.get("text"), "travel_to": v.get("travel_to"), "rest": v.get("rest")}
+        "submissions_visible": [{"user_id": k, "text": v.get("text"), "travel_to": v.get("travel_to"), "rest": v.get("rest"),
+                                 "edited": bool(v.get("edited")), "updated_at": v.get("updated_at")}
                                 for k, v in subs.items()],
         "pending_rolls": p.get("pending_rolls", []), "error": p.get("error"),
     }
@@ -309,7 +335,8 @@ def build_view(db: Session, ctx: Ctx, uid: str | None, tv: bool = False) -> dict
                  "created_at": iso(game.created_at)},
         "me": {"user_id": uid, "character_id": my_member.character_id if my_member else None, "is_host": is_host,
                "is_speaker": bool(uid) and ctx.settings.get("input_mode") == "single" and uid == ctx.speaker_id(),
-               "controls": controls},
+               "controls": controls, "role": my_member.role if my_member else None,
+               "last_seen_id": last_seen, "unseen_count": unseen},
         "tv_url": f"/#/tv/{tv_token}" if (is_host and tv_token) else None,
         "members": members,
         "characters": chars,

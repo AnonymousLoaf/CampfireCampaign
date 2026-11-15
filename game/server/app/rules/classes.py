@@ -1,4 +1,9 @@
-"""Class, race, background and spell-effect data (levels 1-5, all 12 SRD 5.1 classes).
+"""Class, race, background and spell-effect data (levels 1-10, all 12 SRD 5.1 classes — the 2014 rules).
+
+The 2024 rules (SRD 5.2) live in classes_2024.py with the same schema.
+
+Feature `uses` specs: an int, "CHA", "CHA+1", "LEVEL", "LOH" (5 × level), "PROF" (proficiency bonus), or a
+level table {level: value} — use the value for the highest key ≤ the character's level.
 
 Class mechanics follow the 5e SRD 5.1 (one SRD subclass per class). Feature descriptions
 are short paraphrases. Spells listed in SPELL_EFFECTS are resolved by code in combat;
@@ -17,9 +22,10 @@ SKILLS = {
 }
 ALL_SKILLS = list(SKILLS)
 
-PROF_BONUS = {1: 2, 2: 2, 3: 2, 4: 2, 5: 3, 6: 3}
-XP_THRESHOLDS = {1: 0, 2: 300, 3: 900, 4: 2700, 5: 6500, 6: 14000}
-MAX_LEVEL = 5
+PROF_BONUS = {1: 2, 2: 2, 3: 2, 4: 2, 5: 3, 6: 3, 7: 3, 8: 3, 9: 4, 10: 4, 11: 4}
+XP_THRESHOLDS = {1: 0, 2: 300, 3: 900, 4: 2700, 5: 6500, 6: 14000, 7: 23000, 8: 34000, 9: 48000, 10: 64000,
+                 11: 85000}
+MAX_LEVEL = 10
 
 LIGHT_ARMOR = {"padded-armor", "leather-armor", "studded-leather-armor"}
 MEDIUM_ARMOR = {"hide-armor", "chain-shirt", "scale-mail", "breastplate", "half-plate-armor"}
@@ -33,9 +39,17 @@ PRIEST_GEAR = [("backpack", 1), ("blanket", 1), ("candle", 5), ("tinderbox", 1),
                ("waterskin", 1), ("vestments", 1)]
 
 # Spell slots by caster type and character level
-FULL_CASTER_SLOTS = {1: {"1": 2}, 2: {"1": 3}, 3: {"1": 4, "2": 2}, 4: {"1": 4, "2": 3}, 5: {"1": 4, "2": 3, "3": 2}}
-HALF_CASTER_SLOTS = {1: {}, 2: {"1": 2}, 3: {"1": 3}, 4: {"1": 3}, 5: {"1": 4, "2": 2}}
-PACT_SLOTS = {1: (1, 1), 2: (2, 1), 3: (2, 2), 4: (2, 2), 5: (2, 3)}  # (slots, slot level)
+FULL_CASTER_SLOTS = {
+    1: {"1": 2}, 2: {"1": 3}, 3: {"1": 4, "2": 2}, 4: {"1": 4, "2": 3}, 5: {"1": 4, "2": 3, "3": 2},
+    6: {"1": 4, "2": 3, "3": 3}, 7: {"1": 4, "2": 3, "3": 3, "4": 1}, 8: {"1": 4, "2": 3, "3": 3, "4": 2},
+    9: {"1": 4, "2": 3, "3": 3, "4": 3, "5": 1}, 10: {"1": 4, "2": 3, "3": 3, "4": 3, "5": 2},
+}
+HALF_CASTER_SLOTS = {
+    1: {}, 2: {"1": 2}, 3: {"1": 3}, 4: {"1": 3}, 5: {"1": 4, "2": 2}, 6: {"1": 4, "2": 2},
+    7: {"1": 4, "2": 3}, 8: {"1": 4, "2": 3}, 9: {"1": 4, "2": 3, "3": 2}, 10: {"1": 4, "2": 3, "3": 2},
+}
+PACT_SLOTS = {1: (1, 1), 2: (2, 1), 3: (2, 2), 4: (2, 2), 5: (2, 3), 6: (2, 3), 7: (2, 4), 8: (2, 4),
+              9: (2, 5), 10: (2, 5)}  # (slots, slot level)
 
 FIGHTING_STYLES = {
     "Archery": "+2 to attack rolls with ranged weapons.",
@@ -399,6 +413,141 @@ CLASSES: dict[str, dict] = {
     },
 }
 
+# ── levels 6-10 (2014 / SRD 5.1) ────────────────────────────────────────────
+# Spell progressions to level 10.
+_T = lambda *vals: {i + 1: v for i, v in enumerate(vals)}  # noqa: E731  (level table from a list)
+_SPELL_TABLES_2014 = {
+    "bard": {"cantrips_known": _T(2, 2, 2, 3, 3, 3, 3, 3, 3, 4), "spells_known": _T(4, 5, 6, 7, 8, 9, 10, 11, 12, 14)},
+    "cleric": {"cantrips_known": _T(3, 3, 3, 4, 4, 4, 4, 4, 4, 5)},
+    "druid": {"cantrips_known": _T(2, 2, 2, 3, 3, 3, 3, 3, 3, 4)},
+    "paladin": {"cantrips_known": {}},
+    "ranger": {"cantrips_known": {}, "spells_known": _T(0, 2, 3, 3, 4, 4, 5, 5, 6, 6)},
+    "sorcerer": {"cantrips_known": _T(4, 4, 4, 5, 5, 5, 5, 5, 5, 6), "spells_known": _T(2, 3, 4, 5, 6, 7, 8, 9, 10, 11)},
+    "warlock": {"cantrips_known": _T(2, 2, 2, 3, 3, 3, 3, 3, 3, 4), "spells_known": _T(2, 3, 4, 5, 6, 7, 8, 9, 10, 10)},
+    "wizard": {"cantrips_known": _T(3, 3, 3, 4, 4, 4, 4, 4, 4, 5)},
+}
+for _k, _tables in _SPELL_TABLES_2014.items():
+    CLASSES[_k]["spellcasting"].update(_tables)
+
+# Domain / oath spells (always prepared) through level 9.
+CLASSES["cleric"]["spellcasting"]["always"] = {
+    1: ["bless", "cure-wounds"], 3: ["lesser-restoration", "spiritual-weapon"], 5: ["beacon-of-hope", "revivify"],
+    7: ["death-ward", "guardian-of-faith"], 9: ["mass-cure-wounds", "raise-dead"]}
+CLASSES["paladin"]["spellcasting"]["always"] = {
+    3: ["protection-from-evil-and-good", "sanctuary"], 5: ["lesser-restoration", "zone-of-truth"],
+    9: ["beacon-of-hope", "dispel-magic"]}
+
+# Scaling uses (level tables).
+CLASSES["barbarian"]["features"][1][0]["uses"]["max"] = {1: 2, 3: 3, 6: 4}          # Rage
+CLASSES["cleric"]["features"][2][0]["uses"]["max"] = {2: 1, 6: 2}                   # Channel Divinity
+
+_FEATURES_6_10: dict[str, dict[int, list[dict]]] = {
+    "barbarian": {
+        6: [F("Mindless Rage", "While raging you can't be charmed or frightened; such effects are suspended.")],
+        7: [F("Feral Instinct", "Advantage on initiative rolls; you can act normally on a surprise round if you rage first.")],
+        8: [ASI],
+        9: [F("Brutal Critical", "Roll one additional weapon damage die when you score a critical hit with a melee attack.")],
+        10: [F("Intimidating Presence", "Action: frighten a creature within 30 ft (WIS save) until the end of your next turn.")],
+    },
+    "bard": {
+        6: [F("Countercharm", "Action: allies within 30 ft have advantage on saves against being charmed or frightened."),
+            F("Additional Magical Secrets", "Learn two spells from any class's list (counted as bard spells).")],
+        7: [],
+        8: [ASI],
+        9: [F("Song of Rest (d8)", "Your Song of Rest die becomes a d8.")],
+        10: [F("Expertise (more)", "Double proficiency for two more skills."),
+             F("Magical Secrets", "Learn two spells from any class's list."),
+             F("Bardic Inspiration (d10)", "Your Bardic Inspiration die becomes a d10.")],
+    },
+    "cleric": {
+        6: [F("Blessed Healer", "When you cast a healing spell on someone else, you regain 2 + the spell's level hit points.")],
+        7: [],
+        8: [ASI, F("Divine Strike", "Once per turn, a weapon hit deals an extra 1d8 radiant damage."),
+            F("Destroy Undead (CR 1)", "Turned undead of CR 1 or lower are destroyed.")],
+        9: [],
+        10: [F("Divine Intervention", "Call on your deity for help; succeeds if a d100 roll is at or under your cleric level.",
+               {"max": 1, "per": "long"})],
+    },
+    "druid": {
+        6: [F("Land's Stride", "Nonmagical difficult terrain costs no extra movement; advantage on saves against magical plants.")],
+        7: [],
+        8: [ASI, F("Wild Shape (CR 1)", "You can become beasts of CR 1, including ones that fly.")],
+        9: [],
+        10: [F("Nature's Ward", "Immune to poison and disease; elementals and fey can't charm or frighten you.")],
+    },
+    "fighter": {
+        6: [ASI],
+        7: [F("Remarkable Athlete", "Add half your proficiency bonus to STR, DEX and CON checks you aren't proficient in.")],
+        8: [ASI],
+        9: [F("Indomitable", "Reroll a failed saving throw.", {"max": 1, "per": "long"})],
+        10: [F("Additional Fighting Style", "You learn a second fighting style.")],
+    },
+    "monk": {
+        6: [F("Ki-Empowered Strikes", "Your unarmed strikes count as magical."),
+            F("Wholeness of Body", "Action: regain hit points equal to three times your monk level.", {"max": 1, "per": "long"}),
+            F("Unarmored Movement (+15 ft)", "Your unarmored speed bonus becomes +15 ft.")],
+        7: [F("Evasion", "On a DEX save for half damage, you take none on a success and half on a failure."),
+            F("Stillness of Mind", "Action: end one effect charming or frightening you.")],
+        8: [ASI],
+        9: [F("Unarmored Movement Improvement", "Move along walls and across liquids on your turn.")],
+        10: [F("Purity of Body", "Immune to disease and poison."),
+             F("Unarmored Movement (+20 ft)", "Your unarmored speed bonus becomes +20 ft.")],
+    },
+    "paladin": {
+        6: [F("Aura of Protection", "You and allies within 10 ft add your CHA modifier (min +1) to saving throws while you're conscious.")],
+        7: [F("Aura of Devotion", "You and allies within 10 ft can't be charmed while you're conscious.")],
+        8: [ASI],
+        9: [],
+        10: [F("Aura of Courage", "You and allies within 10 ft can't be frightened while you're conscious.")],
+    },
+    "ranger": {
+        6: [F("Favored Enemy (improved)", "Choose another favoured enemy and learn its language."),
+            F("Natural Explorer (improved)", "Choose another favoured terrain.")],
+        7: [F("Defensive Tactics", "Escape the Horde: opportunity attacks against you have disadvantage.")],
+        8: [ASI, F("Land's Stride", "Nonmagical difficult terrain costs no extra movement.")],
+        9: [],
+        10: [F("Hide in Plain Sight", "Spend a minute camouflaging yourself: +10 to Stealth while you stay still."),
+             F("Natural Explorer (third terrain)", "Choose a third favoured terrain.")],
+    },
+    "rogue": {
+        6: [F("Expertise (more)", "Double proficiency for two more skills.")],
+        7: [F("Evasion", "On a DEX save for half damage, you take none on a success and half on a failure.")],
+        8: [ASI],
+        9: [F("Supreme Sneak", "Advantage on Stealth checks if you move no more than half your speed.")],
+        10: [ASI],
+    },
+    "sorcerer": {
+        6: [F("Elemental Affinity", "Add your CHA modifier to one damage roll of a spell that deals your draconic ancestry's damage type.")],
+        7: [],
+        8: [ASI],
+        9: [],
+        10: [F("Metamagic (third option)", "Learn another Metamagic option.")],
+    },
+    "warlock": {
+        6: [F("Dark One's Own Luck", "Add a d10 to an ability check or saving throw.", {"max": 1, "per": "short"})],
+        7: [],
+        8: [ASI],
+        9: [],
+        10: [F("Fiendish Resilience", "After a rest, choose a damage type: you have resistance to it until you choose another.")],
+    },
+    "wizard": {
+        6: [F("Potent Cantrip", "Creatures that succeed on a save against your cantrip still take half its damage.")],
+        7: [],
+        8: [ASI],
+        9: [],
+        10: [F("Empowered Evocation", "Add your INT modifier to one damage roll of any wizard evocation spell you cast.")],
+    },
+}
+for _k, _levels in _FEATURES_6_10.items():
+    for _lvl, _feats in _levels.items():
+        CLASSES[_k]["features"].setdefault(_lvl, []).extend(_feats)
+    for _lvl in range(1, MAX_LEVEL + 1):
+        CLASSES[_k]["features"].setdefault(_lvl, [])
+
+# Levels with an Ability Score Improvement, per class (used by level-up offers).
+ASI_LEVELS = {k: sorted(l for l, fs in c["features"].items() if any(f["name"] == "Ability Score Improvement" for f in fs))
+              for k, c in CLASSES.items()}
+
 BACKGROUNDS = {
     "acolyte": {"index": "acolyte", "name": "Acolyte", "skills": ["Insight", "Religion"], "gold_cp": 1500,
                 "description": "You served in a temple and know its rites and people."},
@@ -439,7 +588,6 @@ SPELL_EFFECTS: dict[str, dict] = {
     "chill-touch": {"kind": "attack", "range": 120, "dice": "1d8", "type": "necrotic", "cantrip": True},
     "eldritch-blast": {"kind": "attack", "range": 120, "dice": "1d10", "type": "force", "beams": True, "cantrip": True},
     "produce-flame": {"kind": "attack", "range": 30, "dice": "1d8", "type": "fire", "cantrip": True},
-    "thorn-whip": {"kind": "attack", "range": 30, "dice": "1d6", "type": "piercing", "cantrip": True},
     "acid-splash": {"kind": "save", "save": "DEX", "range": 60, "dice": "1d6", "type": "acid", "half": False, "cantrip": True},
     "poison-spray": {"kind": "save", "save": "CON", "range": 10, "dice": "1d12", "type": "poison", "half": False, "cantrip": True},
     "sacred-flame": {"kind": "save", "save": "DEX", "range": 60, "dice": "1d8", "type": "radiant", "half": False, "cantrip": True},
@@ -454,8 +602,6 @@ SPELL_EFFECTS: dict[str, dict] = {
                     "dice": "2d8", "type": "thunder", "half": True, "upcast": "1d8"},
     "guiding-bolt": {"kind": "attack", "range": 120, "dice": "4d6", "type": "radiant", "upcast": "1d6", "on_hit_condition": "Outlined"},
     "inflict-wounds": {"kind": "attack", "range": 5, "dice": "3d10", "type": "necrotic", "upcast": "1d10"},
-    "ray-of-sickness": {"kind": "attack", "range": 60, "dice": "2d8", "type": "poison", "upcast": "1d8", "on_hit_condition": "Poisoned"},
-    "dissonant-whispers": {"kind": "save", "save": "WIS", "range": 60, "dice": "3d6", "type": "psychic", "half": True, "upcast": "1d6"},
     "cure-wounds": {"kind": "heal", "range": 5, "dice": "1d8", "upcast": "1d8"},
     "healing-word": {"kind": "heal", "range": 60, "dice": "1d4", "upcast": "1d4", "bonus": True},
     "false-life": {"kind": "buff", "range": 0, "target": "self", "temp_hp": "1d4+4"},
@@ -471,7 +617,6 @@ SPELL_EFFECTS: dict[str, dict] = {
     "faerie-fire": {"kind": "save_condition", "save": "DEX", "range": 60, "area": {"shape": "cube", "size_ft": 20},
                     "condition": "Outlined", "concentration": True},
     "hunters-mark": {"kind": "mark", "range": 90, "dice": "1d6", "bonus": True, "concentration": True},
-    "hex": {"kind": "mark", "range": 90, "dice": "1d6", "type": "necrotic", "bonus": True, "concentration": True},
     # 2nd level
     "scorching-ray": {"kind": "attack", "range": 120, "dice": "2d6", "type": "fire", "rays": 3},
     "acid-arrow": {"kind": "attack", "range": 90, "dice": "4d4", "type": "acid", "upcast": "1d4"},
@@ -511,6 +656,29 @@ SPELL_EFFECTS: dict[str, dict] = {
     "haste": {"kind": "buff", "range": 30, "condition": "Hasted", "concentration": True},
     "beacon-of-hope": {"kind": "buff", "range": 30, "condition": "Hopeful", "concentration": True, "multi": 6},
     "revivify": {"kind": "revive", "range": 5},
+    # 4th level
+    "ice-storm": {"kind": "save", "save": "DEX", "range": 300, "area": {"shape": "sphere", "size_ft": 20}, "dice": "5d8",
+                  "type": "cold", "half": True, "upcast": "1d8"},  # 2d8 bludgeoning + 4d6 cold, folded into one roll
+    "blight": {"kind": "save", "save": "CON", "range": 30, "dice": "8d8", "type": "necrotic", "half": True, "upcast": "1d8"},
+    "phantasmal-killer": {"kind": "save", "save": "WIS", "range": 120, "dice": "4d10", "type": "psychic", "half": False,
+                          "fail_condition": "Frightened", "concentration": True, "upcast": "1d10"},
+    "wall-of-fire": {"kind": "save", "save": "DEX", "range": 120, "area": {"shape": "cube", "size_ft": 20}, "dice": "5d8",
+                     "type": "fire", "half": True, "upcast": "1d8", "concentration": True},
+    "dimension-door": {"kind": "teleport", "range": 500},
+    # 5th level
+    "cone-of-cold": {"kind": "save", "save": "CON", "range": 60, "area": {"shape": "cone", "size_ft": 60}, "from_self": True,
+                     "dice": "8d8", "type": "cold", "half": True, "upcast": "1d8"},
+    "flame-strike": {"kind": "save", "save": "DEX", "range": 60, "area": {"shape": "sphere", "size_ft": 10}, "dice": "8d6",
+                     "type": "fire", "half": True, "upcast": "1d6"},  # 4d6 fire + 4d6 radiant, folded
+    "insect-plague": {"kind": "save", "save": "CON", "range": 300, "area": {"shape": "sphere", "size_ft": 20}, "dice": "4d10",
+                      "type": "piercing", "half": True, "upcast": "1d10", "concentration": True},
+    "cloudkill": {"kind": "save", "save": "CON", "range": 120, "area": {"shape": "sphere", "size_ft": 20}, "dice": "5d8",
+                  "type": "poison", "half": True, "upcast": "1d8", "concentration": True},
+    "mass-cure-wounds": {"kind": "heal", "range": 60, "dice": "3d8", "upcast": "1d8", "multi": 6},
+    "hold-monster": {"kind": "save_condition", "save": "WIS", "range": 90, "condition": "Paralyzed",
+                     "concentration": True, "save_ends": True},
+    "dominate-person": {"kind": "save_condition", "save": "WIS", "range": 60, "condition": "Charmed",
+                        "creature_type": "humanoid", "concentration": True, "save_ends": True},
 }
 
 

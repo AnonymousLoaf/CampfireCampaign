@@ -16,9 +16,10 @@ from .config import MODELS, claude_cli_available
 from .db import SessionLocal, get_db
 from .game import combat, flow
 from .game.hub import Conn, hub
+from .game import notify
 from .game.notify import nudge as send_nudge
 from .game.state import LIVE_EDITABLE, Ctx, build_view, clean_settings, load, lock_for
-from .models import AbilityRoll, Character, Game, Membership, SessionToken, User
+from .models import AbilityRoll, Character, Game, LogEntry, Membership, PushSubscription, SessionToken, User
 from .rules import character as ch
 from .rules import dice, srd
 from .rules import shop as shop_rules
@@ -47,7 +48,9 @@ def current_user(session: str | None = Cookie(default=None), db: Session = Depen
 
 def me_dict(u: User) -> dict:
     return {"id": u.id, "username": u.username, "display_name": u.display_name,
-            "has_api_key": bool(u.api_key_enc), "api_key_last4": u.api_key_last4}
+            "has_api_key": bool(u.api_key_enc), "api_key_last4": u.api_key_last4,
+            "email": u.email, "notify": {"email": bool(u.notify_email), "push": bool(u.notify_push if u.notify_push is not None else True),
+                                         "remind_minutes": u.remind_minutes if u.remind_minutes is not None else 60}}
 
 
 def _login(resp: Response, db: Session, u: User) -> dict:
@@ -132,14 +135,88 @@ def delete_key(u: User = Depends(current_user), db: Session = Depends(get_db)):
 @router.get("/meta")
 def meta(u: User = Depends(current_user)):
     return {"engines": {"offline": True, "claude_code": claude_cli_available(), "api_key": bool(u.api_key_enc)},
-            "models": MODELS}
+            "models": MODELS, "email_available": notify.email_available(), "push_available": notify.push_available()}
+
+
+class NotifyBody(BaseModel):
+    email: str | None = None
+    notify_email: bool | None = None
+    notify_push: bool | None = None
+    remind_minutes: int | None = Field(default=None, ge=0, le=10080)
+
+
+@router.put("/me/notifications")
+def put_notifications(body: NotifyBody, u: User = Depends(current_user), db: Session = Depends(get_db)):
+    fields = body.model_fields_set
+    if "email" in fields:
+        e = (body.email or "").strip()
+        if e and ("@" not in e or len(e) > 200 or " " in e):
+            raise HTTPException(400, "that doesn't look like an email address")
+        u.email = e or None
+    if body.notify_email is not None:
+        u.notify_email = body.notify_email
+    if body.notify_push is not None:
+        u.notify_push = body.notify_push
+    if body.remind_minutes is not None:
+        u.remind_minutes = body.remind_minutes
+    db.commit()
+    return me_dict(u)
+
+
+@router.get("/push/key")
+def push_key(u: User = Depends(current_user)):
+    return {"public_key": notify.vapid_public_key()}
+
+
+class SubscribeBody(BaseModel):
+    subscription: dict
+
+
+@router.post("/push/subscribe")
+def push_subscribe(body: SubscribeBody, u: User = Depends(current_user), db: Session = Depends(get_db)):
+    sub = body.subscription
+    endpoint = str(sub.get("endpoint") or "")
+    keys = sub.get("keys") or {}
+    if not endpoint.startswith("https://") or not keys.get("p256dh") or not keys.get("auth"):
+        raise HTTPException(400, "invalid push subscription")
+    row = db.scalar(select(PushSubscription).where(PushSubscription.endpoint == endpoint))
+    if row:
+        row.user_id = u.id
+        row.keys = {"p256dh": keys["p256dh"], "auth": keys["auth"]}
+    else:
+        db.add(PushSubscription(user_id=u.id, endpoint=endpoint, keys={"p256dh": keys["p256dh"], "auth": keys["auth"]}))
+    db.commit()
+    return {"ok": True}
+
+
+class UnsubscribeBody(BaseModel):
+    endpoint: str
+
+
+@router.delete("/push/subscribe")
+def push_unsubscribe(body: UnsubscribeBody, u: User = Depends(current_user), db: Session = Depends(get_db)):
+    row = db.scalar(select(PushSubscription).where(PushSubscription.endpoint == body.endpoint,
+                                                   PushSubscription.user_id == u.id))
+    if row:
+        db.delete(row)
+        db.commit()
+    return {"ok": True}
+
+
+@router.post("/push/test")
+async def push_test(u: User = Depends(current_user)):
+    await notify.notify_users([u.id], "Async D&D", "Notifications are working on this device.", "/")
+    return {"ok": True}
 
 
 # ── rules & characters ──────────────────────────────────────────────────────
 
 @router.get("/rules/creator")
-def creator_options():
-    return ch.creator_options()
+def creator_options(ruleset: str = "2014"):
+    from .rules.rulesets import available
+    if ruleset not in available():
+        raise HTTPException(400, f"the {ruleset} rules aren't installed on this server")
+    return ch.creator_options(ruleset)
 
 
 def _char_view(c: Character) -> dict:
@@ -248,7 +325,9 @@ def my_games(u: User = Depends(current_user), db: Session = Depends(get_db)):
         host = db.get(User, g.host_id)
         out.append({"id": g.id, "name": g.name, "status": g.status, "phase_type": ctx.phase.get("type"),
                     "deadline": ctx.phase.get("deadline"), "my_turn": u.id in ctx.waiting_on(),
-                    "player_count": len(ctx.members), "max_players": ctx.settings.get("max_players", 4),
+                    "player_count": len([m for m in ctx.members if m.role != "spectator"]),
+                    "max_players": ctx.settings.get("max_players", 4), "ruleset": ctx.settings.get("ruleset", "2014"),
+                    "role": next((m.role for m in ctx.members if m.user_id == u.id), None),
                     "host_name": host.display_name if host else "?", "invite_code": g.invite_code})
     return out
 
@@ -266,6 +345,8 @@ async def create_game(body: CreateGameBody, u: User = Depends(current_user), db:
         settings = clean_settings(body.settings)
     except RulesError as e:
         raise HTTPException(400, str(e))
+    if c.sheet.get("ruleset", "2014") != settings.get("ruleset", "2014"):
+        raise HTTPException(400, f"{c.name} was made with the {c.sheet.get('ruleset', '2014')} rules — pick a matching ruleset or character")
     if settings["dm_engine"] == "api_key" and not u.api_key_enc:
         raise HTTPException(400, "save a Claude API key in Settings first, or pick another DM engine")
     if settings["dm_engine"] == "claude_code" and not claude_cli_available():
@@ -282,7 +363,8 @@ async def create_game(body: CreateGameBody, u: User = Depends(current_user), db:
 
 class JoinBody(BaseModel):
     invite_code: str
-    character_id: str
+    character_id: str | None = None
+    spectate: bool = False
 
 
 @router.post("/games/join")
@@ -290,14 +372,24 @@ async def join_game(body: JoinBody, u: User = Depends(current_user), db: Session
     g = db.scalar(select(Game).where(Game.invite_code == body.invite_code.strip().upper()))
     if not g:
         raise HTTPException(404, "no game with that invite code")
-    if g.status != "lobby":
-        raise HTTPException(400, "that game has already started")
     members = list(db.scalars(select(Membership).where(Membership.game_id == g.id)))
     if any(m.user_id == u.id for m in members):
         raise HTTPException(400, "you're already in that game")
-    if len(members) >= int((g.settings or {}).get("max_players", 4)):
+    if body.spectate:
+        if sum(1 for m in members if m.role == "spectator") >= 10:
+            raise HTTPException(400, "that game already has 10 spectators")
+        db.add(Membership(game_id=g.id, user_id=u.id, character_id=None, role="spectator"))
+        db.commit()
+        await flow.changed(g.id, [m.user_id for m in members] + [u.id])
+        return {"id": g.id}
+    if g.status != "lobby":
+        raise HTTPException(400, "that game has already started — you can still join as a spectator")
+    players = [m for m in members if m.role != "spectator"]
+    if len(players) >= int((g.settings or {}).get("max_players", 4)):
         raise HTTPException(400, "that game is full")
     c = _my_char(db, u, body.character_id)
+    if c.sheet.get("ruleset", "2014") != (g.settings or {}).get("ruleset", "2014"):
+        raise HTTPException(400, f"that game uses the {(g.settings or {}).get('ruleset', '2014')} rules — pick a character made for them")
     db.add(Membership(game_id=g.id, user_id=u.id, character_id=c.id, role="player"))
     c.game_id = g.id
     db.commit()
@@ -412,7 +504,10 @@ async def submit_action(gid: str, body: ActionBody, u: User = Depends(current_us
             raise RulesError("rest must be short or long")
         if not text and not travel and not rest:
             raise RulesError("describe what you do")
-        p.setdefault("submissions", {})[u.id] = {"text": text, "travel_to": travel, "rest": rest}
+        from .game.state import iso, now as _now
+        prev = p.setdefault("submissions", {}).get(u.id)
+        p["submissions"][u.id] = {"text": text, "travel_to": travel, "rest": rest, "edited": bool(prev),
+                                  "updated_at": iso(_now())}
         p["paused"] = False
         return {"resolve": True}
     return await mutate(gid, u, fn)
@@ -808,6 +903,102 @@ async def nudge(gid: str, body: NudgeBody, u: User = Depends(current_user)):
         await send_nudge(target["ctx"], body.user_id)
         await hub.lobby_changed([body.user_id])
     return res
+
+
+class AwayBody(BaseModel):
+    until: str | None = None  # ISO time; null = back now; "indefinite" = until I come back
+
+
+@router.post("/games/{gid}/away")
+async def set_away(gid: str, body: AwayBody, u: User = Depends(current_user)):
+    from datetime import datetime, timedelta, timezone
+
+    def fn(ctx: Ctx):
+        m = _member(ctx, u)
+        if not m.character_id:
+            raise RulesError("spectators can't go away — they just watch")
+        if not body.until:
+            m.away_until = None
+            ctx.log("system", f"{ctx.user_name(u.id)} is back.")
+            return {"resolve": True}
+        if body.until == "indefinite":
+            until = datetime.now(timezone.utc) + timedelta(days=365)
+        else:
+            try:
+                until = datetime.fromisoformat(body.until.replace("Z", "+00:00"))
+            except ValueError:
+                raise RulesError("bad date")
+            if until.tzinfo is None:
+                until = until.replace(tzinfo=timezone.utc)
+            if until <= datetime.now(timezone.utc):
+                raise RulesError("pick a time in the future")
+        m.away_until = until
+        ctx.log("system", f"{ctx.user_name(u.id)} is away — the DM will play {ctx.chars[m.character_id]['name']} cautiously until they're back.")
+        if ctx.phase.get("type") == "combat":
+            flow.after_combat_change(ctx, dict(ctx.encounter["turn"]) if ctx.encounter else None)
+        return {"resolve": True}
+    return await mutate(gid, u, fn, allow_busy=True)
+
+
+@router.get("/games/{gid}/log")
+def game_log(gid: str, before_id: int | None = None, limit: int = 50, kinds: str | None = None,
+             u: User = Depends(current_user), db: Session = Depends(get_db)):
+    if not db.scalar(select(Membership).where(Membership.game_id == gid, Membership.user_id == u.id)):
+        raise HTTPException(403, "you're not in this game")
+    q = select(LogEntry).where(LogEntry.game_id == gid)
+    if before_id:
+        q = q.where(LogEntry.id < before_id)
+    if kinds:
+        q = q.where(LogEntry.kind.in_([k.strip() for k in kinds.split(",") if k.strip()]))
+    limit = max(1, min(200, limit))
+    rows = list(db.scalars(q.order_by(LogEntry.id.desc()).limit(limit + 1)))
+    return {"entries": [{"id": l.id, "ts": l.ts.isoformat() if l.ts else None, "kind": l.kind, "author": l.author,
+                         "text": l.text, "data": l.data} for l in rows[:limit]], "has_more": len(rows) > limit}
+
+
+class SeenBody(BaseModel):
+    log_id: int
+
+
+@router.post("/games/{gid}/seen")
+def mark_seen(gid: str, body: SeenBody, u: User = Depends(current_user), db: Session = Depends(get_db)):
+    m = db.scalar(select(Membership).where(Membership.game_id == gid, Membership.user_id == u.id))
+    if not m:
+        raise HTTPException(403, "you're not in this game")
+    if not m.last_seen_id or body.log_id > m.last_seen_id:
+        m.last_seen_id = body.log_id
+        db.commit()
+    return {"ok": True}
+
+
+@router.post("/games/{gid}/recap")
+async def recap(gid: str, u: User = Depends(current_user)):
+    from .dm import engines as eng
+    db = SessionLocal()
+    try:
+        try:
+            ctx = load(db, gid)
+        except RulesError:
+            raise HTTPException(404, "game not found")
+        m = _member(ctx, u)
+        q = select(LogEntry).where(LogEntry.game_id == gid, LogEntry.kind.in_(["narration", "event", "action"]))
+        if m.last_seen_id:
+            q = q.where(LogEntry.id > m.last_seen_id)
+        rows = list(db.scalars(q.order_by(LogEntry.id.desc()).limit(60)))
+        rows.reverse()
+        if not rows:
+            return {"text": "You're all caught up."}
+        lines = [f"- [{r.kind}{' · ' + r.author if r.author else ''}] {r.text[:700]}" for r in rows]
+        user = (f"Story summary so far: {ctx.summary or '(none)'}\n\nWhat happened since the player last looked "
+                f"(oldest first):\n" + "\n".join(lines))
+        try:
+            engine = flow._engine_for(ctx)
+            text = await engine.summarize(eng.RECAP_SYSTEM, user)
+        except eng.DMError as e:
+            raise HTTPException(400, f"couldn't make a recap: {e}")
+        return {"text": text}
+    finally:
+        db.close()
 
 
 @router.post("/games/{gid}/retry-dm")

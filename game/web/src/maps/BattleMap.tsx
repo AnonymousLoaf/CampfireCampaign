@@ -196,6 +196,8 @@ export default function BattleMap({
     if (!interactive) return;
     const sq = squareAt(e);
     if (!sq) return;
+    // On touch screens there is no hover: a tap also shows what's on the square.
+    if (!hover || hover.x !== sq.x || hover.y !== sq.y) setHover(sq);
     const tok = encounter.tokens.find((t) => t.x === sq.x && t.y === sq.y && t.hp_state !== "dead");
     if (aim) {
       if (aim.mode === "point" && inAimRange(sq.x, sq.y) && onAimPoint) onAimPoint(sq.x, sq.y);
@@ -249,6 +251,7 @@ export default function BattleMap({
               : interactive && hover && (reachSet.has(`${hover.x},${hover.y}`) || (hoverTok && targetSet.has(hoverTok.id)))
                 ? "pointer"
                 : "default",
+          touchAction: "manipulation",
         }}
       />
       {hoverTok && interactive && (

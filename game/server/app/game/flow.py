@@ -28,7 +28,7 @@ def srd_name(index: str) -> str:
 from ..models import DMCall, Game, LogEntry, User
 from ..rules import character as ch
 from ..rules.character import RulesError
-from ..rules.classes import XP_THRESHOLDS
+from ..rules.rulesets import R
 from ..security import decrypt_secret
 from ..world import hexmap
 from . import combat
@@ -74,9 +74,9 @@ def start_game(ctx: Ctx, uid: str) -> None:
     ctx.state["scene"] = {"type": "town", "time_of_day": "morning", "weather": "clear", "day": 1, "hour": 8}
     lvl = int(ctx.settings.get("starting_level", 1))
     for _, s in ctx.party():
-        while s["level"] < lvl:
+        while s["level"] < min(lvl, R(s).MAX_LEVEL):
             ch.level_up(s, ch.auto_choices(s))
-        s["xp"] = max(s.get("xp", 0), XP_THRESHOLDS[s["level"]])
+        s["xp"] = max(s.get("xp", 0), R(s).XP_THRESHOLDS[s["level"]])
         s["level_target"] = max(s.get("level_target", 1), s["level"])
     g.status = "active"
     names = ", ".join(s["name"] for _, s in ctx.party())
@@ -172,6 +172,9 @@ def _resolve_exploration(ctx: Ctx, waiting: list[str], policy: str) -> None:
             note = ("didn't act in time — play them cautiously and in character (they follow the party's lead)"
                     if policy == "ai" else "holds back this round and does nothing notable")
             lines.append(f"- {_char_label(ctx, cid)}: ({note})")
+        for cid in ctx.away_chars():
+            lines.append(f"- {_char_label(ctx, cid)}: (their player is away — play them cautiously and in character, "
+                         f"following the party's lead; never put words in their mouth beyond small talk)")
     # travel by majority vote
     votes: dict[str, int] = {}
     dests: dict[str, dict] = {}
@@ -297,11 +300,31 @@ def _resolve_combat_timeout(ctx: Ctx, policy: str) -> None:
     after_combat_change(ctx, enc["turn"].copy())
 
 
+def play_away(ctx: Ctx) -> None:
+    """The AI takes combat turns for characters whose players are on vacation."""
+    enc = ctx.encounter
+    if not enc:
+        return
+    away = ctx.away_chars()
+    for _ in range(len(away) * 3 + 3):
+        acted = False
+        for cid in away:
+            tid = f"pc-{cid}"
+            if not enc.get("outcome") and combat.can_act(enc, tid, ctx.chars):
+                ctx.log_lines(combat.auto_turn(enc, ctx.chars, tid, "ai"))
+                ctx.log_lines(combat.advance(enc, ctx.chars))
+                acted = True
+        if not acted:
+            break
+
+
 def after_combat_change(ctx: Ctx, turn_before: dict | None = None) -> None:
     """After any combat change: end the fight, narrate a finished round, or keep going."""
     enc = ctx.encounter
     if not enc:
         return
+    if not combat.check_end(enc, ctx.chars) and not enc.get("round_complete"):
+        play_away(ctx)
     outcome = combat.check_end(enc, ctx.chars)
     if outcome:
         _finish_combat(ctx, outcome)
@@ -460,6 +483,8 @@ async def run_dm(game_id: str) -> None:
                 ctx.open_phase("roll", p_text, pending_rolls=toolbox.pending_rolls)
             elif ctx.encounter and not ctx.encounter.get("outcome"):
                 ctx.open_phase("combat", p_text)
+                if ctx.away_chars():
+                    after_combat_change(ctx, dict(ctx.encounter["turn"]))
             elif toolbox.opened_shop and ctx.state.get("shop"):
                 ctx.open_phase("shop", p_text)
             else:
@@ -520,6 +545,11 @@ async def tick() -> None:
             await resolve(gid)
         except Exception:
             log.exception("resolving %s failed", gid)
+    try:
+        from .notify import send_reminders
+        await send_reminders()
+    except Exception:
+        log.exception("reminders failed")
 
 
 async def recover_on_startup() -> None:

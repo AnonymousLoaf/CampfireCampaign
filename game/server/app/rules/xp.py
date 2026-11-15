@@ -7,7 +7,8 @@ from . import srd
 
 THRESHOLDS = {  # per character: easy, medium, hard, deadly
     1: (25, 50, 75, 100), 2: (50, 100, 150, 200), 3: (75, 150, 225, 400),
-    4: (125, 250, 375, 500), 5: (250, 500, 750, 1100),
+    4: (125, 250, 375, 500), 5: (250, 500, 750, 1100), 6: (300, 600, 900, 1400),
+    7: (350, 750, 1100, 1700), 8: (450, 900, 1400, 2100), 9: (550, 1100, 1600, 2400), 10: (600, 1200, 1900, 2800),
 }
 DIFFICULTY_TARGET = {"story": 0, "normal": 1, "hard": 2, "deadly": 3}  # index into THRESHOLDS
 
@@ -39,19 +40,20 @@ def encounter_xp(monsters: list[dict]) -> int:
 
 def budget(levels: list[int], difficulty: str) -> int:
     idx = DIFFICULTY_TARGET.get(difficulty, 1)
-    return sum(THRESHOLDS.get(max(1, min(5, lv)), THRESHOLDS[1])[idx] for lv in levels)
+    return sum(THRESHOLDS.get(max(1, min(10, lv)), THRESHOLDS[1])[idx] for lv in levels)
 
 
-def random_encounter(levels: list[int], difficulty: str, biome: str, seed: int | None = None) -> list[tuple[str, int]]:
+def random_encounter(levels: list[int], difficulty: str, biome: str, seed: int | None = None,
+                     ruleset: str = "2014") -> list[tuple[str, int]]:
     """Pick (monster index, count) pairs whose adjusted XP fits the party's budget."""
     rng = random.Random(seed)
     target = budget(levels, difficulty)
-    max_cr = max(0.25, min(3, sum(levels) / max(1, len(levels)) * 0.75))
+    max_cr = max(0.25, min(8, sum(levels) / max(1, len(levels)) * 0.75))
     types = BIOME_TYPES.get(biome, {"beast", "humanoid"})
-    pool = [m for m in srd.monsters_by_cr(max_cr, types) if (m.get("xp") or 0) > 0 and m.get("size") in
-            ("Tiny", "Small", "Medium", "Large")]
+    pool = [m for m in srd.monsters_by_cr(max_cr, types, ruleset) if (m.get("xp") or 0) > 0 and m.get("size") in
+            ("Tiny", "Small", "Medium", "Large") and srd.monster_actions(m)]
     if not pool:
-        pool = srd.monsters_by_cr(0.5)
+        pool = srd.monsters_by_cr(0.5, None, ruleset) or srd.monsters_by_cr(0.5)
     rng.shuffle(pool)
     for m in pool:
         xp = int(m["xp"])

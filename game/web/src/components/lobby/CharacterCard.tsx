@@ -9,7 +9,10 @@ export default function CharacterCard({ c, onDelete, onLevelUp }: { c: Character
         {initials(c.name)}
       </div>
       <div className="char-card-body">
-        <div className="char-name">{c.name}</div>
+        <div className="char-name">
+          {c.name}
+          <span className={`ruleset-badge r${c.ruleset ?? "2014"}`}>{c.ruleset ?? "2014"}</span>
+        </div>
         <div className="muted small">
           Level {c.level} {c.race}
           {c.subrace ? ` (${c.subrace})` : ""} {c.class}

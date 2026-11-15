@@ -40,6 +40,24 @@ Pick per game (and change any time in the ⚙ game settings):
 - **Who acts** (game settings): each player, or **one table speaker** who types and acts for the whole party — shops and combat included.
 - **📺 TV view** gives a private link (no login) for a TV or laptop across the room: map, party stats, story, shop stock and whose turn it is.
 
+## Notifications
+
+Each player sets their own in Settings: push on this device, email, and a reminder before their deadline.
+
+- **Push** works out of the box on `http://localhost`. Phones need the game served over **HTTPS** (a Cloudflare Tunnel or Tailscale HTTPS gives you that) — browsers only allow push on secure pages. The server makes its own VAPID keys in `server/data/`.
+- **Email** needs an SMTP account. Set these before starting the server:
+
+```powershell
+$env:GAME_SMTP_HOST = "smtp.example.com"   # your mail provider's SMTP server
+$env:GAME_SMTP_PORT = "587"
+$env:GAME_SMTP_USER = "you@example.com"
+$env:GAME_SMTP_PASSWORD = "app-password"
+$env:GAME_SMTP_FROM = "Async D&D <you@example.com>"
+$env:GAME_PUBLIC_URL = "https://your-game-address"   # so emails can link back to the game
+```
+
+Nothing is sent during a live session.
+
 ## Tests
 
 ```powershell
@@ -47,7 +65,7 @@ cd server
 .venv\Scripts\python.exe -m pytest -q
 ```
 
-`tests/test_rules.py` covers dice, characters, shops and full auto-played fights; `tests/test_m2.py` covers every class to level 5, level-ups, preparation, area shapes, Fireball, Extra Attack, features, concentration, shops and loot; `tests/test_flow.py` plays two-player games end to end with the offline DM (M1 loop, and an M2 loop with rests, haggling, Rage and an area spell).
+`tests/test_m3.py` covers every class to level 10 in both rulesets, 2024 creation, masteries, feats, 2024 monsters and fights, and the notification/vacation/spectator/history API; `tests/test_data_m3.py` validates the rules tables against both datasets. `tests/test_rules.py` covers dice, characters, shops and full auto-played fights; `tests/test_m2.py` covers every class to level 5, level-ups, preparation, area shapes, Fireball, Extra Attack, features, concentration, shops and loot; `tests/test_flow.py` plays two-player games end to end with the offline DM (M1 loop, and an M2 loop with rests, haggling, Rage and an area spell).
 
 ## What's in (M1 + M2)
 
@@ -61,4 +79,13 @@ cd server
 - **Shops**: general, blacksmith, alchemist, magic (priced by rarity), temple and inn services; haggling (one Persuasion check per character per shop).
 - **Rests** by party vote (rest rules: standard, gritty, epic), with wilderness interruptions; **loot** by CR after victories; four more battle maps (dungeon, ruins, camp, swamp).
 
-Not yet (M3+): levels above 5, 2024 rules, monster spellcasting, opportunity attacks along the path (they check start and end squares), Great Weapon Fighting rerolls, ammunition recovery, email/push notifications, mobile layout polish, public hosting.
+**M3:**
+- **2024 rules (SRD 5.2)** alongside 2014: species and lineages, background ability scores (+2/+1 or +1/+1/+1), origin feats (Alert, Magic Initiate, Savage Attacker, Skilled), weapon masteries applied in combat (Vex, Topple, Sap, Slow, Push, Graze, Cleave), feats instead of an ability increase, 2024 class tables and spells, 2024 monster stat blocks, exhaustion. Pick the ruleset per game; characters belong to one ruleset. The 2024 data is built with `skills/dnd/scripts/build_srd.py --ruleset 2024` and lives in `server/rulesdata/`.
+- **Levels 1–10** for both rulesets, with 4th/5th-level slots and spells and the tier-2 features (Aura of Protection, Brutal Critical, Indomitable, Divine Strike, Empowered Evocation, Potent Cantrip, and more).
+- **Notifications:** browser push, email, and deadline reminders.
+- **Vacation mode:** "I'm away" — the AI plays your character cautiously until you're back.
+- **Spectators** can follow a game without a character.
+- **History:** a Story tab with the whole campaign, a "Since you were last here" card, and "Catch me up" (the DM summarises what you missed).
+- **Phone layout:** bottom tabs (Story / Map / Party / Sheet), touch pan and pinch-zoom on maps, full-screen dialogs.
+
+Not yet: levels above 10, monster spellcasting, opportunity attacks along the path (they check start and end squares), Great Weapon Fighting rerolls, ammunition recovery, Evasion (no monster area attacks yet), public hosting.

@@ -125,12 +125,26 @@ def weapon_profile(rec: dict) -> dict:
 # ── monsters ────────────────────────────────────────────────────────────────
 
 @lru_cache(maxsize=1)
-def monsters() -> dict[str, dict]:
+def _monsters_2014() -> dict[str, dict]:
     return {m["index"]: m for m in data()["monsters"]}
 
 
-def find_monster(name: str) -> dict | None:
-    ms = monsters()
+@lru_cache(maxsize=1)
+def _monsters_2024() -> dict[str, dict]:
+    return {m["index"]: _norm_monster_2024(m) for m in data_2024()["monsters"]}
+
+
+def monsters(ruleset: str = "2014") -> dict[str, dict]:
+    return _monsters_2024() if ruleset == "2024" and data_2024()["monsters"] else _monsters_2014()
+
+
+def find_monster(name: str, ruleset: str = "2014") -> dict | None:
+    ms = monsters(ruleset)
+    if ruleset == "2024":  # 2024 renamed a few: goblin → goblin-warrior etc.; fall back to a 2014 name match
+        alias = {"goblin": "goblin-warrior", "goblins": "goblin-warrior", "orc": "orc", "kobold": "kobold-warrior"}
+        k = _norm(name)
+        if k in alias and alias[k] in ms:
+            return ms[alias[k]]
     key = _norm(name)
     if key in ms:
         return ms[key]
@@ -146,10 +160,42 @@ def find_monster(name: str) -> dict | None:
     return None
 
 
-def monster_actions(m: dict) -> list[dict]:
-    """Parse attack actions out of the monster's description text."""
+_ACTION_2024 = re.compile(r"Action\s*\W+\s*(?P<name>[^(\n:]+?)\s*\((?P<dice>\d*d\d+(?:\s*[+-]\s*\d+)?)\s+(?P<type>[a-z]+)\)", re.I)
+_RANGED_2024 = {"shortbow": (80, 320), "light crossbow": (80, 320), "longbow": (150, 600), "heavy crossbow": (100, 400),
+                "hand crossbow": (30, 120), "sling": (30, 120), "javelin": (30, 120), "dart": (20, 60),
+                "spear": (20, 60), "dagger": (20, 60), "handaxe": (20, 60)}
+_RANGED_WORDS = ("bow", "crossbow", "sling", "ray", "bolt", "spit", "blast", "rock", "spike", "dart")
+
+
+def _actions_2024(m: dict) -> list[dict]:
+    """2024 stat blocks give only 'Name (dice type)': derive the attack bonus and damage modifier."""
+    pb = int(m.get("proficiency_bonus") or 2)
+    smod, dmod = (m.get("str", 10) - 10) // 2, (m.get("dex", 10) - 10) // 2
     out = []
-    for a in _ACTION.finditer(m.get("description") or ""):
+    for a in _ACTION_2024.finditer(m.get("description") or ""):
+        name = a.group("name").strip()
+        low = name.lower()
+        rng = next((v for k, v in _RANGED_2024.items() if k == low), None)
+        ranged = bool(rng and low not in ("spear", "dagger", "handaxe", "javelin")) or any(w in low for w in _RANGED_WORDS) \
+            or low == "javelin"
+        if low == "javelin":
+            ranged = False  # javelins are thrown melee weapons; the engine treats them as melee
+        use = dmod if ranged else max(smod, dmod if low in ("scimitar", "shortsword", "rapier", "dagger") else smod)
+        dice = a.group("dice").replace(" ", "")
+        if not re.search(r"[+-]\d+$", dice) and use:
+            dice = f"{dice}{use:+d}"
+        out.append({"name": name, "to_hit": pb + use, "dice": dice, "type": a.group("type").lower(),
+                    "ranged": ranged, "range": (rng[0] if rng else 60) if ranged else 5,
+                    "long_range": (rng[1] if rng else None) if ranged else None, "reach": 5})
+    return out
+
+
+def monster_actions(m: dict) -> list[dict]:
+    """Parse attack actions out of the monster's description text (2014 or 2024 stat-block wording)."""
+    out = []
+    if m.get("_rules") == "2024" or (m.get("proficiency_bonus") and "to hit" not in (m.get("description") or "")):
+        out = _actions_2024(m)
+    for a in _ACTION.finditer(m.get("description") or "") if not out else []:
         kind = a.group("kind").lower()
         ranged = kind.startswith("ranged")
         out.append({
@@ -174,8 +220,15 @@ _NUM = {"two": 2, "three": 3, "four": 4, "five": 5}
 
 def monster_multiattack(m: dict) -> int:
     """How many attacks the monster makes with its Multiattack action (1 if none)."""
-    mm = re.search(r"Multiattack:[^.]*?makes (two|three|four|five)\b", m.get("description") or "", re.I)
-    return _NUM.get(mm.group(1).lower(), 1) if mm else 1
+    desc = m.get("description") or ""
+    mm = re.search(r"Multiattack:[^.]*?makes (two|three|four|five)\b", desc, re.I)
+    if mm:
+        return _NUM.get(mm.group(1).lower(), 1)
+    mm = re.search(r"Multiattack:([^.\n]*)", desc, re.I)
+    if mm:  # 2024 wording: "makes one Bite attack and one Claw attack"
+        n = len(re.findall(r"\bone\b", mm.group(1), re.I))
+        return max(1, min(4, n))
+    return 1
 
 
 def monster_speed(m: dict) -> int:
@@ -186,11 +239,63 @@ def monster_speed(m: dict) -> int:
     return int(mm.group(1)) if mm else 30
 
 
+# ── 2024 dataset ────────────────────────────────────────────────────────────
+
+@lru_cache(maxsize=1)
+def data_2024() -> dict:
+    from ..config import SRD_2024_PATH
+    if not SRD_2024_PATH.exists():
+        return {"spells": [], "monsters": [], "species": [], "subspecies": [], "backgrounds": [], "feats": [],
+                "weapon_mastery_properties": [], "features": [], "equipment": [], "magic_items": []}
+    return json.loads(SRD_2024_PATH.read_text(encoding="utf-8"))
+
+
+def _norm_monster_2024(m: dict) -> dict:
+    rec = dict(m)
+    cr = m.get("cr_value", m.get("cr"))
+    if isinstance(cr, str):
+        from fractions import Fraction
+        try:
+            cr = float(Fraction(cr.strip()))  # "1/4" → 0.25
+        except (ValueError, ZeroDivisionError):
+            cr = 0.0
+    rec["cr"] = cr
+    rec["type"] = str(m.get("type") or "").split(" ")[0].lower()
+    rec["_rules"] = "2024"
+    for k in ("resistances", "immunities", "vulnerabilities", "condition_immunities"):
+        rec.setdefault(k, "")
+    return rec
+
+
 # ── spells, races ───────────────────────────────────────────────────────────
 
 @lru_cache(maxsize=1)
-def spells() -> dict[str, dict]:
+def _spells_2014() -> dict[str, dict]:
     return {s["index"]: s for s in data()["spells"]}
+
+
+@lru_cache(maxsize=1)
+def _spells_2024() -> dict[str, dict]:
+    old = _spells_2014()
+    by_name = {s["name"].lower().replace("'", ""): s for s in old.values()}
+    out = {}
+    for s in data_2024()["spells"]:
+        rec = dict(s)
+        prev = old.get(s["index"]) or by_name.get(s["name"].lower().replace("'", ""))
+        rec.setdefault("classes", list((prev or {}).get("classes") or []))
+        out[s["index"]] = rec
+    try:  # the rules-data module may supply 2024 class lists for spells missing from 2014
+        from .classes_2024 import SPELL_CLASSES_2024  # type: ignore
+        for idx, cls in SPELL_CLASSES_2024.items():
+            if idx in out:
+                out[idx]["classes"] = list(cls)
+    except ImportError:
+        pass
+    return out
+
+
+def spells(ruleset: str = "2014") -> dict[str, dict]:
+    return _spells_2024() if ruleset == "2024" and data_2024()["spells"] else _spells_2014()
 
 
 @lru_cache(maxsize=1)
@@ -203,9 +308,9 @@ def subraces() -> dict[str, dict]:
     return {r["index"]: r for r in data()["subraces"]}
 
 
-def monsters_by_cr(max_cr: float, types: set[str] | None = None) -> list[dict]:
+def monsters_by_cr(max_cr: float, types: set[str] | None = None, ruleset: str = "2014") -> list[dict]:
     out = []
-    for m in monsters().values():
+    for m in monsters(ruleset).values():
         cr = m.get("cr")
         if cr is None or cr > max_cr:
             continue

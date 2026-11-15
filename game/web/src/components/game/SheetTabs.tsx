@@ -101,7 +101,18 @@ export function CharacterSheet({ c, onLevelUp }: { c: CharacterView; onLevelUp?:
         Level {c.level} {c.race}
         {c.subrace ? ` (${c.subrace})` : ""} {c.class}
         {c.subclass ? ` — ${c.subclass}` : ""} · {c.background} · {c.alignment}
+        {c.ruleset && <span className={`ruleset-badge r${c.ruleset}`}>{c.ruleset}</span>}
       </div>
+      {!!c.exhaustion && c.exhaustion > 0 && (
+        <div className="exhaustion-line small" title="2024 rules: each level of exhaustion is −2 to every d20 test; level 6 is death.">
+          <span className="exh-pips">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <span key={i} className={`pip ${i < (c.exhaustion ?? 0) ? "full" : ""}`} />
+            ))}
+          </span>
+          Exhaustion {c.exhaustion} · −{2 * (c.exhaustion ?? 0)} to d20 tests
+        </div>
+      )}
       <div className="sheet-stats">
         <Stat label="AC" value={c.ac} />
         <Stat label="HP" value={`${c.hp}/${c.hp_max}`} />
@@ -111,9 +122,10 @@ export function CharacterSheet({ c, onLevelUp }: { c: CharacterView; onLevelUp?:
         <Stat label="Passive" value={c.passive_perception} />
       </div>
       <div className="xp-line small">
-        XP {c.xp.toLocaleString()} / {c.xp_next.toLocaleString()}
+        XP {c.xp.toLocaleString()}
+        {c.xp_next ? ` / ${c.xp_next.toLocaleString()}` : " · max level"}
         <div className="xpbar">
-          <div style={{ width: `${Math.min(100, (c.xp / Math.max(1, c.xp_next)) * 100)}%` }} />
+          <div style={{ width: `${c.xp_next ? Math.min(100, (c.xp / Math.max(1, c.xp_next)) * 100) : 100}%` }} />
         </div>
       </div>
       <div className="ability-grid">
@@ -139,13 +151,44 @@ export function CharacterSheet({ c, onLevelUp }: { c: CharacterView; onLevelUp?:
       {c.attacks.length === 0 && <div className="muted small">No attacks — equip a weapon.</div>}
       {c.attacks.map((a) => (
         <div key={a.id} className="attack-row small">
-          <strong>{a.name}</strong>
+          <strong>
+            {a.name}
+            {a.mastery && (
+              <span className="badge tiny mastery" title={masteryText(c, a.mastery)}>
+                {a.mastery}
+              </span>
+            )}
+          </strong>
           <span>
             {signed(a.to_hit)} to hit · {a.damage} {a.damage_type} · {a.range_ft}
             {a.long_range_ft ? `/${a.long_range_ft}` : ""} ft
           </span>
         </div>
       ))}
+      {c.masteries && c.masteries.length > 0 && (
+        <>
+          <h4>Weapon masteries</h4>
+          {c.masteries.map((m) => (
+            <details key={m.weapon_key} className="feature">
+              <summary>
+                {m.name} <span className="badge tiny mastery">{m.mastery}</span>
+              </summary>
+              <div className="small">{m.description || MASTERY_TEXT[m.mastery] || ""}</div>
+            </details>
+          ))}
+        </>
+      )}
+      {c.feats && c.feats.length > 0 && (
+        <>
+          <h4>Feats</h4>
+          {c.feats.map((f) => (
+            <details key={f.name} className="feature">
+              <summary>{f.name}</summary>
+              <div className="small">{f.description}</div>
+            </details>
+          ))}
+        </>
+      )}
       {c.actions && c.actions.length > 0 && (
         <>
           <h4>Combat actions</h4>
@@ -199,6 +242,22 @@ export function CharacterSheet({ c, onLevelUp }: { c: CharacterView; onLevelUp?:
       )}
     </div>
   );
+}
+
+/** Short descriptions of the 2024 weapon mastery properties (fallback when the server sends none). */
+const MASTERY_TEXT: Record<string, string> = {
+  Vex: "Hit: you have advantage on your next attack against that target.",
+  Topple: "Hit: the target makes a CON save or falls prone.",
+  Sap: "Hit: the target has disadvantage on its next attack.",
+  Slow: "Hit: the target's speed drops by 10 ft.",
+  Push: "Hit: the target is pushed 10 ft away from you.",
+  Graze: "Miss: you still deal damage equal to your ability modifier.",
+  Cleave: "Hit: make one extra attack against a different adjacent enemy (once per turn).",
+  Nick: "Make the extra light-weapon attack as part of the Attack action.",
+};
+
+function masteryText(c: CharacterView, mastery: string): string {
+  return c.masteries?.find((m) => m.mastery === mastery)?.description || MASTERY_TEXT[mastery] || mastery;
 }
 
 function Stat({ label, value }: { label: string; value: string | number }) {

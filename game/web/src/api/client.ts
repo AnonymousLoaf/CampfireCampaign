@@ -8,9 +8,12 @@ import type {
   GameView,
   Issue,
   LevelUpBody,
+  LogEntry,
   Me,
   Meta,
+  NotificationsPatch,
   RestKind,
+  Ruleset,
   SettingsPatch,
   TravelTo,
 } from "./types";
@@ -61,7 +64,7 @@ const get = <T,>(p: string) => request<T>("GET", p);
 const post = <T,>(p: string, b?: unknown) => request<T>("POST", p, b ?? {});
 const put = <T,>(p: string, b?: unknown) => request<T>("PUT", p, b ?? {});
 const patch = <T,>(p: string, b?: unknown) => request<T>("PATCH", p, b ?? {});
-const del = <T,>(p: string) => request<T>("DELETE", p);
+const del = <T,>(p: string, b?: unknown) => request<T>("DELETE", p, b);
 
 type Ok = { ok: true };
 
@@ -79,9 +82,15 @@ export const api = {
   setApiKey: (key: string) => put<Me>("/me/api-key", { key }),
   removeApiKey: () => del<Me>("/me/api-key"),
   meta: () => get<Meta>("/meta"),
+  setNotifications: (p: NotificationsPatch) => put<Me>("/me/notifications", p),
+  pushKey: () => get<{ public_key: string }>("/push/key"),
+  pushSubscribe: (subscription: unknown) => post<Ok>("/push/subscribe", { subscription }),
+  pushUnsubscribe: (endpoint: string) => del<Ok>("/push/subscribe", { endpoint }),
+  pushTest: () => post<Ok>("/push/test"),
 
   // rules / characters
-  creatorOptions: () => get<CreatorOptions>("/rules/creator"),
+  creatorOptions: (ruleset: Ruleset = "2014") =>
+    get<CreatorOptions>(ruleset === "2014" ? "/rules/creator" : `/rules/creator?ruleset=${ruleset}`),
   characters: () => get<CharacterView[]>("/characters"),
   character: (id: string) => get<CharacterView>(`/characters/${id}`),
   rollAbilities: () => post<AbilityRoll>("/characters/roll-abilities"),
@@ -96,6 +105,17 @@ export const api = {
     post<{ id: string }>("/games", { name, settings, character_id }),
   joinGame: (invite_code: string, character_id: string) =>
     post<{ id: string }>("/games/join", { invite_code, character_id }),
+  spectateGame: (invite_code: string) => post<{ id: string }>("/games/join", { invite_code, spectate: true }),
+  away: (id: string, until: string | null) => post<Ok>(`/games/${id}/away`, { until }),
+  log: (id: string, opts: { before_id?: number | string; limit?: number; kinds?: string } = {}) => {
+    const q = new URLSearchParams();
+    if (opts.before_id !== undefined) q.set("before_id", String(opts.before_id));
+    q.set("limit", String(opts.limit ?? 50));
+    if (opts.kinds) q.set("kinds", opts.kinds);
+    return get<{ entries: LogEntry[]; has_more: boolean }>(`/games/${id}/log?${q.toString()}`);
+  },
+  seen: (id: string, log_id: number | string) => post<Ok>(`/games/${id}/seen`, { log_id }),
+  recap: (id: string) => post<{ text: string }>(`/games/${id}/recap`),
   view: (id: string, character_id?: string | null) =>
     get<GameView>(`/games/${id}/view` + (character_id ? `?character_id=${encodeURIComponent(character_id)}` : "")),
   start: (id: string) => post<Ok>(`/games/${id}/start`),

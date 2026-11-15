@@ -193,8 +193,89 @@ export default function WorldMap({
     return { x: clientX - rect.left + (view?.x ?? 0), y: clientY - rect.top + (view?.y ?? 0) };
   };
 
-  const onMouseDown = (e: React.MouseEvent) => {
+  // ── touch: one-finger pan, two-finger pinch zoom, tap to pick ──
+  const touch = useRef<
+    | null
+    | { mode: "pan"; sx: number; sy: number; vx: number; vy: number; moved: boolean }
+    | { mode: "pinch"; d0: number; s0: number; vx: number; vy: number; mx: number; my: number }
+  >(null);
+  const lastTouch = useRef(0);
+  const dist2 = (a: React.Touch, b: React.Touch) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+
+  const onTouchStart = (e: React.TouchEvent) => {
     if (!view) return;
+    lastTouch.current = Date.now();
+    if (e.touches.length === 1) {
+      const t = e.touches[0];
+      touch.current = { mode: "pan", sx: t.clientX, sy: t.clientY, vx: view.x, vy: view.y, moved: false };
+    } else if (e.touches.length === 2) {
+      const [a, b] = [e.touches[0], e.touches[1]];
+      const rect = canvasRef.current!.getBoundingClientRect();
+      touch.current = {
+        mode: "pinch",
+        d0: Math.max(1, dist2(a, b)),
+        s0: view.scale,
+        vx: view.x,
+        vy: view.y,
+        mx: (a.clientX + b.clientX) / 2 - rect.left,
+        my: (a.clientY + b.clientY) / 2 - rect.top,
+      };
+    }
+  };
+  const onTouchMove = (e: React.TouchEvent) => {
+    const t0 = touch.current;
+    if (!view || !t0) return;
+    lastTouch.current = Date.now();
+    if (t0.mode === "pan" && e.touches.length === 1) {
+      const t = e.touches[0];
+      const dx = t.clientX - t0.sx;
+      const dy = t.clientY - t0.sy;
+      if (Math.abs(dx) + Math.abs(dy) > 6) t0.moved = true;
+      if (t0.moved) {
+        userMoved.current = true;
+        setView({ ...view, x: t0.vx - dx, y: t0.vy - dy });
+      }
+    } else if (t0.mode === "pinch" && e.touches.length === 2) {
+      const d = dist2(e.touches[0], e.touches[1]);
+      const ns = Math.max(0.4, Math.min(4, t0.s0 * (d / t0.d0)));
+      const k = ns / t0.s0;
+      userMoved.current = true;
+      setView({ scale: ns, x: (t0.vx + t0.mx) * k - t0.mx, y: (t0.vy + t0.my) * k - t0.my });
+    }
+  };
+  const onTouchEnd = (e: React.TouchEvent) => {
+    const t0 = touch.current;
+    lastTouch.current = Date.now();
+    if (t0?.mode === "pan" && !t0.moved && e.changedTouches.length === 1) {
+      const t = e.changedTouches[0];
+      pickAt(t.clientX, t.clientY);
+    }
+    // Lifting one finger of a pinch leaves a pan with the remaining finger.
+    if (e.touches.length === 1 && view) {
+      const t = e.touches[0];
+      touch.current = { mode: "pan", sx: t.clientX, sy: t.clientY, vx: view.x, vy: view.y, moved: true };
+    } else if (e.touches.length === 0) touch.current = null;
+  };
+  /** Touch devices fire mouse events after a tap; ignore those so a tap doesn't pick twice. */
+  const fromTouch = () => Date.now() - lastTouch.current < 700;
+
+  const pickAt = (clientX: number, clientY: number) => {
+    if (!view || !interactive || !onPick) return;
+    const p = toWorld(clientX, clientY);
+    const [q, r] = pixelToHex(p.x, p.y, BASE * view.scale);
+    if (q < 0 || r < 0 || q >= world.w || r >= world.h) return;
+    if (q === world.party.q && r === world.party.r) return;
+    const st = world.settlements.find((x) => x.q === q && x.r === r && revealed(q, r));
+    if (st) onPick({ settlement_id: st.id }, st.name);
+    else {
+      const poi = world.pois.find((x) => x.q === q && x.r === r);
+      const biome = BIOME_NAMES[world.hexes[r]?.[q] ?? ""] ?? "Unknown";
+      onPick({ q, r }, poi ? poi.name : revealed(q, r) ? `${biome} (${q}, ${r})` : `Unexplored (${q}, ${r})`);
+    }
+  };
+
+  const onMouseDown = (e: React.MouseEvent) => {
+    if (!view || fromTouch()) return;
     drag.current = { sx: e.clientX, sy: e.clientY, vx: view.x, vy: view.y, moved: false };
   };
   const onMouseMove = (e: React.MouseEvent) => {
@@ -219,18 +300,8 @@ export default function WorldMap({
   const onMouseUp = (e: React.MouseEvent) => {
     const d = drag.current;
     drag.current = null;
-    if (!view || !d || d.moved || !interactive || !onPick) return;
-    const p = toWorld(e.clientX, e.clientY);
-    const [q, r] = pixelToHex(p.x, p.y, BASE * view.scale);
-    if (q < 0 || r < 0 || q >= world.w || r >= world.h) return;
-    if (q === world.party.q && r === world.party.r) return;
-    const st = world.settlements.find((x) => x.q === q && x.r === r && revealed(q, r));
-    if (st) onPick({ settlement_id: st.id }, st.name);
-    else {
-      const poi = world.pois.find((x) => x.q === q && x.r === r);
-      const biome = BIOME_NAMES[world.hexes[r]?.[q] ?? ""] ?? "Unknown";
-      onPick({ q, r }, poi ? poi.name : revealed(q, r) ? `${biome} (${q}, ${r})` : `Unexplored (${q}, ${r})`);
-    }
+    if (!d || d.moved || fromTouch()) return;
+    pickAt(e.clientX, e.clientY);
   };
   const onWheel = (e: React.WheelEvent) => {
     if (!view) return;
@@ -266,7 +337,11 @@ export default function WorldMap({
           setHover(null);
         }}
         onWheel={onWheel}
-        style={{ cursor: interactive ? (drag.current?.moved ? "grabbing" : "pointer") : "default" }}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+        onTouchCancel={() => (touch.current = null)}
+        style={{ cursor: interactive ? (drag.current?.moved ? "grabbing" : "pointer") : "default", touchAction: "none" }}
       />
       <div className="map-overlay top-left">
         {locationName && <span className="map-chip">📍 {locationName}</span>}

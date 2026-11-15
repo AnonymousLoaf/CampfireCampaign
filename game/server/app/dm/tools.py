@@ -201,8 +201,9 @@ class ToolBox:
         if self.ctx.encounter:
             return "Error: a fight is already in progress."
         specs = []
+        ruleset = self.ctx.settings.get("ruleset", "2014")
         for m in monsters or []:
-            rec = srd.find_monster(str(m.get("name", "")))
+            rec = srd.find_monster(str(m.get("name", "")), ruleset) or srd.find_monster(str(m.get("name", "")))
             if not rec:
                 raise RulesError(f"no SRD monster called {m.get('name')!r}")
             specs.append((rec["index"], max(1, min(8, int(m.get("count", 1))))))
@@ -212,7 +213,8 @@ class ToolBox:
         if not party:
             raise RulesError("no living party members")
         enc, lines = combat.start(specs, terrain, party, self.ctx.settings.get("combat_mode", "side"),
-                                  self.ctx.settings.get("death_rule", "standard"), seed=random.randrange(1 << 30))
+                                  self.ctx.settings.get("death_rule", "standard"), seed=random.randrange(1 << 30),
+                                  ruleset=ruleset)
         self.ctx.state["encounter"] = enc
         self.ctx.log_lines(lines)
         self.started_combat = True
@@ -516,8 +518,9 @@ def do_travel(ctx: Ctx, dest: tuple[int, int]) -> str:
     enc_note = ""
     if random.random() < chance and ctx.living_party():
         levels = [s["level"] for _, s in ctx.living_party()]
-        specs = xp_rules.random_encounter(levels, ctx.settings.get("difficulty", "normal"), plan["main_biome"])
-        names = ", ".join(f"{c} × {srd.monsters()[i]['name']}" for i, c in specs)
+        rsk = ctx.settings.get("ruleset", "2014")
+        specs = xp_rules.random_encounter(levels, ctx.settings.get("difficulty", "normal"), plan["main_biome"], ruleset=rsk)
+        names = ", ".join(f"{c} × {(srd.monsters(rsk).get(i) or srd.monsters()[i])['name']}" for i, c in specs)
         enc_note = (f" A random encounter is due on the way: {names}. Stage it (ambush, standoff, or something they can talk "
                     f"their way past) and call start_combat if it comes to blows.")
     return f"The party arrives at {name} after {days:g} days through {hexmap.BIOME_NAMES[plan['main_biome']]}.{enc_note}"

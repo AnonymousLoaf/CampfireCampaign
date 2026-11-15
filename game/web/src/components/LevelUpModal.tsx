@@ -29,6 +29,10 @@ export default function LevelUpModal({
   const [expertise, setExpertise] = useState<string[]>([]);
   const [cantrips, setCantrips] = useState<string[]>([]);
   const [spells, setSpells] = useState<string[]>([]);
+  // M3: at ASI levels a feat may replace the ASI; new weapon masteries
+  const [improve, setImprove] = useState<"asi" | "feat">("asi");
+  const [feat, setFeat] = useState("");
+  const [masteries, setMasteries] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [result, setResult] = useState<{ hp_gained?: number; level?: number } | null>(null);
@@ -42,7 +46,11 @@ export default function LevelUpModal({
   }
 
   const capped = (k: Ability, plus: number) => character.abilities[k] + plus > 20;
-  const asi: Partial<Record<Ability, number>> | null = !offer.asi
+  const featOptions = offer.asi ? offer.feat_options ?? [] : [];
+  const takingFeat = featOptions.length > 0 && improve === "feat";
+  const masteryCount = offer.masteries ?? 0;
+  const masteryOptions = offer.mastery_options ?? [];
+  const asi: Partial<Record<Ability, number>> | null = !offer.asi || takingFeat
     ? null
     : asiMode === "two"
       ? asiOne
@@ -53,7 +61,10 @@ export default function LevelUpModal({
         : null;
 
   const problems: string[] = [];
-  if (offer.asi && !asi) problems.push(asiMode === "two" ? "Pick an ability to raise by 2." : "Pick two abilities to raise by 1.");
+  if (offer.asi && !takingFeat && !asi) problems.push(asiMode === "two" ? "Pick an ability to raise by 2." : "Pick two abilities to raise by 1.");
+  if (takingFeat && !feat) problems.push("Pick a feat.");
+  if (masteryCount > 0 && masteries.length !== Math.min(masteryCount, masteryOptions.length))
+    problems.push(`Pick ${masteryCount} new weapon master${masteryCount > 1 ? "ies" : "y"}.`);
   if (offer.subclass_options?.length && !subclass) problems.push("Choose a subclass.");
   if (offer.fighting_style_options?.length && !style) problems.push("Choose a fighting style.");
   if (offer.expertise && expertise.length !== offer.expertise) problems.push(`Pick ${offer.expertise} skills for Expertise.`);
@@ -77,6 +88,8 @@ export default function LevelUpModal({
       if (expertise.length) body.expertise = expertise;
       if (cantrips.length) body.cantrips = cantrips;
       if (spells.length) body.spells = spells;
+      if (takingFeat && feat) body.feat = feat;
+      if (masteries.length) body.masteries = masteries;
       const r = await submit(body);
       setResult(r ?? {});
     } catch (e) {
@@ -148,7 +161,31 @@ export default function LevelUpModal({
           </section>
         )}
 
-        {offer.asi && (
+        {offer.asi && featOptions.length > 0 && (
+          <section>
+            <h3>Improvement</h3>
+            <div className="seg">
+              <button className={improve === "asi" ? "active" : ""} onClick={() => setImprove("asi")}>
+                Ability scores
+              </button>
+              <button className={improve === "feat" ? "active" : ""} onClick={() => setImprove("feat")}>
+                Take a feat
+              </button>
+            </div>
+            {takingFeat && (
+              <div className="choice-grid">
+                {featOptions.map((f) => (
+                  <button key={f.name} className={`choice ${feat === f.name ? "selected" : ""}`} onClick={() => setFeat(f.name)}>
+                    <strong>{f.name}</strong>
+                    <span className="small">{f.description}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+
+        {offer.asi && !takingFeat && (
           <section>
             <h3>Ability Score Improvement</h3>
             <div className="seg">
@@ -230,6 +267,29 @@ export default function LevelUpModal({
                     onClick={() => toggle(expertise, setExpertise, sk, offer.expertise)}
                   >
                     {sk}
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        {masteryCount > 0 && (
+          <section>
+            <h3>
+              Weapon mastery <span className="muted small">({masteries.length}/{masteryCount})</span>
+            </h3>
+            <div className="chip-grid">
+              {masteryOptions.map((m) => {
+                const picked = masteries.includes(m.weapon_key);
+                return (
+                  <button
+                    key={m.weapon_key}
+                    className={`chip ${picked ? "selected" : ""}`}
+                    disabled={!picked && masteries.length >= masteryCount}
+                    onClick={() => toggle(masteries, setMasteries, m.weapon_key, masteryCount)}
+                  >
+                    {m.name} <span className="muted small">{m.mastery}</span>
                   </button>
                 );
               })}

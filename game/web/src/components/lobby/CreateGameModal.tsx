@@ -219,7 +219,7 @@ export default function CreateGameModal({
     dm_engine: meta.engines.api_key ? "api_key" : meta.engines.claude_code ? "claude_code" : "offline",
     dm_model: meta.models[0]?.id ?? DEFAULT_SETTINGS.dm_model,
   });
-  const [charId, setCharId] = useState(characters[0]?.id ?? "");
+  const [charId, setCharId] = useState(characters.find((c) => (c.ruleset ?? "2014") === "2014")?.id ?? "");
   const set = <K extends keyof GameSettings>(k: K, v: GameSettings[K]) => setS((prev) => ({ ...prev, [k]: v }));
 
   const [create, busy, error] = useAction(async () => {
@@ -290,7 +290,7 @@ export default function CreateGameModal({
             </Field>
             <Field label="Starting level">
               <select value={s.starting_level} onChange={(e) => set("starting_level", Number(e.target.value))}>
-                {[1, 2, 3, 4, 5].map((l) => (
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((l) => (
                   <option key={l} value={l}>
                     Level {l}
                   </option>
@@ -316,9 +316,18 @@ export default function CreateGameModal({
               <input type="range" min={10} max={100} step={5} value={Math.round(s.sell_rate * 100)} onChange={(e) => set("sell_rate", Number(e.target.value) / 100)} />
             </Field>
             <Field label="Ruleset">
-              <select value={s.ruleset} onChange={() => set("ruleset", "2014")}>
-                <option value="2014">5e 2014 (SRD 5.1)</option>
-              </select>
+              <Seg
+                options={[
+                  { value: "2014", label: "2014 (SRD 5.1)" },
+                  { value: "2024", label: "2024 (SRD 5.2)", hint: "Background ability scores, origin feats, weapon mastery" },
+                ]}
+                value={s.ruleset}
+                onChange={(v) => {
+                  set("ruleset", v);
+                  const pick = characters.find((c) => (c.ruleset ?? "2014") === v);
+                  setCharId(pick?.id ?? "");
+                }}
+              />
             </Field>
           </div>
         </fieldset>
@@ -388,7 +397,7 @@ export default function CreateGameModal({
 
         <fieldset>
           <legend>Your character</legend>
-          <CharacterPicker characters={characters} value={charId} onChange={setCharId} />
+          <CharacterPicker characters={characters} value={charId} onChange={setCharId} ruleset={s.ruleset} />
         </fieldset>
       </div>
     </Modal>

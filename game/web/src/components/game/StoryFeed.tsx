@@ -81,15 +81,45 @@ export function LogItem({ e }: { e: LogEntry }) {
   }
 }
 
-export default function StoryFeed({ log, busy }: { log: LogEntry[]; busy: boolean }) {
+export default function StoryFeed({
+  log,
+  busy,
+  lastSeenId,
+  onAtBottom,
+  header,
+}: {
+  log: LogEntry[];
+  busy: boolean;
+  /** Entries after this id are "new since your last visit". */
+  lastSeenId?: number | null;
+  /** Called when the reader has scrolled to the newest entry. */
+  onAtBottom?: () => void;
+  header?: React.ReactNode;
+}) {
   const ref = useRef<HTMLDivElement | null>(null);
   const stick = useRef(true);
   const lastId = log.length ? log[log.length - 1].id : null;
+  // Freeze the divider position for this visit so it doesn't jump when entries are marked read.
+  const dividerAfter = useRef<number | null | undefined>(undefined);
+  if (dividerAfter.current === undefined && lastSeenId !== undefined) dividerAfter.current = lastSeenId;
+  const firstNewIdx =
+    dividerAfter.current !== null && dividerAfter.current !== undefined
+      ? log.findIndex((e) => Number(e.id) > Number(dividerAfter.current))
+      : -1;
+
+  // Our own scrolling (sticking to the newest entry) also fires scroll events; only the reader's scrolling counts as reading.
+  const programmatic = useRef(false);
+  const userScrolled = useRef(false);
 
   useEffect(() => {
     const el = ref.current;
-    if (el && stick.current) el.scrollTop = el.scrollHeight;
-  }, [lastId, busy]);
+    if (el && stick.current) {
+      programmatic.current = true;
+      el.scrollTop = el.scrollHeight;
+    }
+    // New entries arriving while the reader sits at the bottom (after they've scrolled once) count as read.
+    if (el && onAtBottom && userScrolled.current && stick.current) onAtBottom();
+  }, [lastId, busy]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div
@@ -97,12 +127,27 @@ export default function StoryFeed({ log, busy }: { log: LogEntry[]; busy: boolea
       ref={ref}
       onScroll={(e) => {
         const el = e.currentTarget;
-        stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+        const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+        stick.current = gap < 80;
+        if (programmatic.current) {
+          programmatic.current = false;
+          return;
+        }
+        userScrolled.current = true;
+        if (gap < 40 && onAtBottom) onAtBottom();
       }}
     >
+      {header}
       {log.length === 0 && <div className="muted center-text">The story hasn't begun yet.</div>}
-      {log.map((e) => (
-        <LogItem key={e.id} e={e} />
+      {log.map((e, i) => (
+        <div key={e.id} className="log-wrap">
+          {i === firstNewIdx && i > 0 && (
+            <div className="new-divider" id="new-since-last-visit">
+              New since your last visit
+            </div>
+          )}
+          <LogItem e={e} />
+        </div>
       ))}
       {busy && (
         <div className="log-writing">

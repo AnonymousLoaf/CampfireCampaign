@@ -15,9 +15,10 @@ export default function JoinGameModal({
   onJoined: (id: string) => void;
 }) {
   const [code, setCode] = useState("");
+  const [mode, setMode] = useState<"play" | "watch">("play");
   const [charId, setCharId] = useState(characters[0]?.id ?? "");
   const [join, busy, error] = useAction(async () => {
-    const res = await api.joinGame(code.trim(), charId);
+    const res = mode === "watch" ? await api.spectateGame(code.trim()) : await api.joinGame(code.trim(), charId);
     onJoined(res.id);
   });
 
@@ -30,8 +31,12 @@ export default function JoinGameModal({
           <button className="btn ghost" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn primary" disabled={busy || !code.trim() || !charId} onClick={() => void join()}>
-            Join
+          <button
+            className="btn primary"
+            disabled={busy || !code.trim() || (mode === "play" && !charId)}
+            onClick={() => void join()}
+          >
+            {mode === "watch" ? "Watch" : "Join"}
           </button>
         </>
       }
@@ -41,7 +46,24 @@ export default function JoinGameModal({
           Invite code
           <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="e.g. K7Q2XD" autoFocus />
         </label>
-        <CharacterPicker characters={characters} value={charId} onChange={setCharId} />
+        <div className="seg">
+          <button className={mode === "play" ? "active" : ""} onClick={() => setMode("play")}>
+            Play a character
+          </button>
+          <button className={mode === "watch" ? "active" : ""} onClick={() => setMode("watch")}>
+            Just watch
+          </button>
+        </div>
+        {mode === "play" ? (
+          <>
+            <CharacterPicker characters={characters} value={charId} onChange={setCharId} />
+            <p className="muted small">Your character must use the same rules (2014 or 2024) as the game.</p>
+          </>
+        ) : (
+          <p className="muted small">
+            Spectators see the whole game — story, maps and the party — but can't act. No character needed.
+          </p>
+        )}
         <ErrorText error={error} />
       </div>
     </Modal>

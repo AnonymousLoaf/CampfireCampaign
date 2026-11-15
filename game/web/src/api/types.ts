@@ -4,17 +4,38 @@ export type Ability = "STR" | "DEX" | "CON" | "INT" | "WIS" | "CHA";
 export const ABILITIES: Ability[] = ["STR", "DEX", "CON", "INT", "WIS", "CHA"];
 export type AbilityMap = Record<Ability, number>;
 
+export type Ruleset = "2014" | "2024";
+
+export interface NotifyPrefs {
+  email: boolean;
+  push: boolean;
+  remind_minutes: number;
+}
+
 export interface Me {
   id: string;
   username: string;
   display_name: string;
   has_api_key: boolean;
   api_key_last4: string | null;
+  // M3
+  email?: string | null;
+  notify?: NotifyPrefs;
+}
+
+export interface NotificationsPatch {
+  email?: string | null;
+  notify_email?: boolean;
+  notify_push?: boolean;
+  remind_minutes?: number;
 }
 
 export interface Meta {
   engines: { offline: boolean; claude_code: boolean; api_key: boolean };
   models: { id: string; label: string }[];
+  // M3
+  email_available?: boolean;
+  push_available?: boolean;
 }
 
 // ---------- Rules ----------
@@ -91,6 +112,21 @@ export interface ClassOption {
   subclasses?: NamedOption[];
   fighting_styles?: null | NamedOption[];
   expertise_at_l1?: number;
+  // M3 (2024)
+  weapon_mastery?: number;
+  mastery_options?: MasteryOption[];
+}
+
+export interface MasteryOption {
+  weapon_key: string;
+  name: string;
+  mastery: string;
+}
+
+export interface Feat {
+  name: string;
+  description: string;
+  category?: "origin" | "general" | "fighting_style";
 }
 
 export interface Background {
@@ -99,6 +135,11 @@ export interface Background {
   skills: string[];
   description: string;
   gold_cp: number;
+  // M3 (2024)
+  ability_options?: Ability[];
+  /** `list` is the class spell list a Magic Initiate origin feat draws from (e.g. "Cleric"), when the server knows it. */
+  origin_feat?: { name: string; description: string; list?: string | null } | null;
+  tool?: string | null;
 }
 
 export interface CreatorOptions {
@@ -109,6 +150,9 @@ export interface CreatorOptions {
   standard_array: number[];
   point_buy: { budget: number; min: number; max: number; costs: Record<string, number> };
   alignments: string[];
+  // M3
+  feats?: Feat[];
+  ruleset?: Ruleset;
 }
 
 // ---------- Characters ----------
@@ -140,6 +184,8 @@ export interface Attack {
   long_range_ft: number | null;
   kind: "melee" | "ranged" | "spell";
   properties: string[];
+  // M3 (2024)
+  mastery?: string | null;
 }
 
 export interface Issue {
@@ -181,6 +227,10 @@ export interface LevelUpOffer {
   spell_options: Spell[];
   max_spell_level: number;
   features: { name: string; description: string }[];
+  // M3
+  feat_options?: null | { name: string; description: string }[];
+  masteries?: number;
+  mastery_options?: MasteryOption[];
 }
 
 export interface LevelUpBody {
@@ -192,6 +242,9 @@ export interface LevelUpBody {
   expertise?: string[];
   cantrips?: string[];
   spells?: string[];
+  // M3
+  feat?: string;
+  masteries?: string[];
 }
 
 export interface ClassAction {
@@ -226,7 +279,7 @@ export interface CharacterView {
   color: string;
   level: number;
   xp: number;
-  xp_next: number;
+  xp_next: number | null;
   prof_bonus: number;
   hp: number;
   hp_max: number;
@@ -255,6 +308,11 @@ export interface CharacterView {
   issues: Issue[];
   pending_level_up?: LevelUpOffer | null;
   actions?: ClassAction[];
+  // M3
+  ruleset?: Ruleset;
+  feats?: { name: string; description: string }[];
+  masteries?: { weapon_key: string; name: string; mastery: string; description: string }[];
+  exhaustion?: number;
 }
 
 export interface CreateCharacter {
@@ -279,6 +337,11 @@ export interface CreateCharacter {
   expertise?: string[];
   bonus_abilities?: Ability[];
   ancestry?: string;
+  // M3 (2024)
+  ruleset?: Ruleset;
+  background_asi?: Partial<AbilityMap>;
+  masteries?: string[];
+  magic_initiate?: null | { cantrips: string[]; spell: string };
 }
 
 export interface AbilityRoll {
@@ -301,7 +364,7 @@ export interface GameSettings {
   magic_level: "low" | "standard" | "high";
   economy: "scarce" | "standard" | "rich";
   sell_rate: number;
-  ruleset: "2014";
+  ruleset: Ruleset;
   rolls: "players" | "auto";
   combat_mode: "side" | "classic";
   narration_length: "short" | "medium" | "long";
@@ -404,8 +467,15 @@ export interface Phase {
   opened_at: string | null;
   deadline: string | null;
   waiting_on: string[];
-  my_submission: null | { text: string; travel_to: TravelTo; rest?: RestKind };
-  submissions_visible: { user_id: string; text: string; travel_to: TravelTo; rest?: RestKind }[];
+  my_submission: null | { text: string; travel_to: TravelTo; rest?: RestKind; edited?: boolean; updated_at?: string };
+  submissions_visible: {
+    user_id: string;
+    text: string;
+    travel_to: TravelTo;
+    rest?: RestKind;
+    edited?: boolean;
+    updated_at?: string;
+  }[];
   pending_rolls: PendingRoll[];
   error: string | null;
 }
@@ -526,9 +596,11 @@ export interface Member {
   user_id: string;
   display_name: string;
   character_id: string | null;
-  role: "host" | "player";
+  role: "host" | "player" | "spectator";
   has_acted: boolean;
   ready: boolean;
+  // M3
+  away_until?: string | null;
 }
 
 export interface GameView {
@@ -547,6 +619,10 @@ export interface GameView {
     is_host: boolean;
     is_speaker?: boolean;
     controls?: string[];
+    // M3
+    role?: "host" | "player" | "spectator";
+    last_seen_id?: number | null;
+    unseen_count?: number;
   };
   tv_url?: string | null;
   members: Member[];
