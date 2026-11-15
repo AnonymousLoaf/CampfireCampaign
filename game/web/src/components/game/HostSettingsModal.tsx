@@ -3,7 +3,7 @@ import { api } from "../../api/client";
 import type { GameSettings, Meta, SettingsPatch } from "../../api/types";
 import Modal from "../Modal";
 import ErrorText, { useAction } from "../ErrorText";
-import { COMBAT, Field, INPUT, NARRATION, ROLLS, Seg, TIMEOUT, TimerPicker } from "../lobby/CreateGameModal";
+import { Field, INPUT, NARRATION, ROLLS, Seg, TIMEOUT, TimerPicker } from "../lobby/CreateGameModal";
 import { useGame } from "./gameContext";
 
 const KEYS: (keyof SettingsPatch)[] = [
@@ -15,7 +15,6 @@ const KEYS: (keyof SettingsPatch)[] = [
   "speaker_id",
   "timeout_policy",
   "rolls",
-  "combat_mode",
   "narration_length",
   "dm_engine",
   "dm_model",
@@ -114,7 +113,7 @@ export default function HostSettingsModal({ onClose }: { onClose: () => void }) 
             <Seg options={ROLLS} value={s.rolls} onChange={(v) => set("rolls", v)} />
           </Field>
           <Field label="Combat">
-            <Seg options={COMBAT} value={s.combat_mode} onChange={(v) => set("combat_mode", v)} />
+            <div className="muted small">Fights go in initiative order, one character at a time. On your turn you type what you do; the DM moves tokens and asks for your rolls.</div>
           </Field>
           <Field label="Narration length">
             <Seg options={NARRATION} value={s.narration_length} onChange={(v) => set("narration_length", v)} />

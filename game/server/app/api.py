@@ -708,6 +708,9 @@ def _need_phase(ctx: Ctx, *types: str) -> dict:
 @router.post("/games/{gid}/action")
 async def submit_action(gid: str, body: ActionBody, u: User = Depends(current_user)):
     def fn(ctx: Ctx):
+        if ctx.phase.get("type") == "combat" and ctx.encounter and ctx.encounter.get("mode") == "classic":
+            flow.declare_combat(ctx, u.id, body.text)  # typed combat: the acting player's turn, resolved by the DM
+            return None
         p = _need_phase(ctx, "exploration")
         if u.id not in ctx.required_users():
             if ctx.settings.get("input_mode") == "single":

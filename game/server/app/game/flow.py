@@ -31,7 +31,7 @@ from ..rules.character import RulesError
 from ..rules.rulesets import R
 from ..security import decrypt_secret
 from ..world import hexmap
-from . import combat
+from . import combat, turns
 from .hub import hub
 from .notify import notify_phase
 from .state import Ctx, iso, load, lock_for, now, parse_iso
@@ -258,17 +258,116 @@ def _dest_coords(ctx: Ctx, d: dict) -> tuple[int, int]:
 def _resolve_rolls(ctx: Ctx) -> None:
     p = ctx.phase
     lines = ["Roll results:"]
+    combat_rolls = False
     for r in p.get("pending_rolls", []):
         if r.get("result") is None:
             roll_pending(ctx, r)
             r["auto"] = True
         res = r["result"]
+        late = " (rolled automatically — the player missed the deadline)" if r.get("auto") else ""
+        if r.get("combat"):
+            combat_rolls = True
+            lines.append(f"- {r['label']}{late}, resolved by the game: " + " ".join(res.get("lines") or []))
+            continue
         verdict = "" if res.get("success") is None else (" — SUCCESS" if res["success"] else " — FAILURE")
-        lines.append(f"- {r['label']}: {res['total']} (d20 {res.get('natural')}{res['modifier']:+d}) vs DC {r['dc']}{verdict}"
-                     + (" (rolled automatically — the player missed the deadline)" if r.get("auto") else ""))
+        lines.append(f"- {r['label']}: {res['total']} (d20 {res.get('natural')}{res['modifier']:+d}) vs DC {r['dc']}{verdict}{late}")
+    enc = ctx.encounter
+    if enc and enc.get("queue"):  # steps left after the last roll (shouldn't happen, but never leave them hanging)
+        _, rest = turns.execute_through(enc, ctx.chars, "")
+        ctx.log_lines(rest)
+    if enc and combat.check_end(enc, ctx.chars):
+        _finish_combat(ctx, enc["outcome"])
+        return
     lines.append("")
-    lines.append("Narrate what these results mean, applying consequences with tools.")
-    queue_dm(ctx, "rolls", "\n".join(lines))
+    if enc and enc.get("declared"):
+        actor = enc["tokens"].get(enc["declared"]["tid"], {}).get("name", "the character")
+        lines.append(f"Narrate what these results mean for {actor}'s turn (exactly these hits, misses and damage). If "
+                     f"their declared action has more to it, resolve that too; then call combat_end_turn and narrate what "
+                     f"the enemies do next.")
+    else:
+        lines.append("Narrate what these results mean, applying consequences with tools.")
+    queue_dm(ctx, "combat_rolls" if combat_rolls else "rolls", "\n".join(lines))
+
+
+def declare_combat(ctx: Ctx, uid: str, text: str) -> None:
+    """A player types what their character does on their combat turn; the DM resolves it."""
+    enc = ctx.encounter
+    if not enc or enc.get("outcome"):
+        raise RulesError("no fight is in progress")
+    t = turns.actor(enc, ctx.chars)
+    if not t:
+        raise RulesError("it isn't a player's turn yet")
+    if not ctx.can_control(uid, t["character_id"]):
+        raise RulesError(f"it's {t['name']}'s turn")
+    text = text.strip()[:1000]
+    if not text:
+        raise RulesError("describe what you do")
+    enc["declared"] = {"tid": t["id"], "text": text}
+    ctx.log("action", text, f"{t['name']} · {ctx.user_name(uid)}")
+    body = _combat_turn_body(ctx, t["id"], f"{t['name']}'s player says: \"{text}\"")
+    queue_dm(ctx, "combat_turn", body)
+
+
+def _combat_turn_body(ctx: Ctx, tid: str, declared: str) -> str:
+    enc = ctx.encounter
+    since = enc.get("round_log") or []
+    parts = []
+    if since:
+        parts.append("Since your last narration (already resolved by the game):")
+        parts += [f"- {ln}" for ln in since[-30:]]
+        parts.append("")
+    parts.append(f"Round {enc['round']}. {declared}")
+    parts.append("")
+    parts.append(turns.brief(enc, ctx.chars, tid))
+    parts.append("")
+    parts.append(
+        "Resolve this turn with the combat tools, in the order it happens. Interpret the player's words generously but "
+        "by the rules: movement up to their speed, one action (Attack = their listed number of weapon attacks), one bonus "
+        "action if a feature or spell gives one, free object interactions. If they ask for more than a turn allows, "
+        "resolve what fits and say what didn't. Improvised actions (shove, grapple, swing from the chandelier, throw sand) "
+        "are combat_action 'other' plus roll_check/apply_damage/add_condition as you rule. If the player's rolls are "
+        "needed, narrate up to the moment of the roll and stop; you'll get the results. If nothing needs a roll, narrate "
+        "the outcome, call combat_end_turn, and narrate what the enemies do next. If the action is unclear or "
+        "impossible and you changed nothing, say so in character and ask them again — their turn stays open.")
+    return "\n".join(parts)
+
+
+def _auto_combat_turns(ctx: Ctx, policy: str, only_away: bool) -> bool:
+    """Play the turns of characters whose players missed the deadline (or are away). Returns True if a DM
+    narration was queued (or the fight ended)."""
+    enc = ctx.encounter
+    if not enc:
+        return False
+    away = set(ctx.away_chars())
+    played = False
+    for _ in range(len(enc["order"]) * 2 + 2):
+        t = turns.actor(enc, ctx.chars)
+        if not t or enc.get("queue"):
+            break
+        if only_away and t["character_id"] not in away:
+            break
+        pol = "ai" if t["character_id"] in away else policy
+        enc.pop("declared", None)
+        ctx.log_lines(combat.auto_turn(enc, ctx.chars, t["id"], pol))
+        ctx.log_lines(combat.advance(enc, ctx.chars))
+        enc.pop("round_complete", None)
+        played = True
+        if combat.check_end(enc, ctx.chars):
+            break
+        if not only_away:
+            policy, only_away = policy, True  # after the late player's turn, keep going only for away players
+    if not played:
+        return False
+    if combat.check_end(enc, ctx.chars):
+        _finish_combat(ctx, enc["outcome"])
+        return True
+    nxt = turns.actor(enc, ctx.chars)
+    body = ["What happened (already resolved by the game):"] + [f"- {ln}" for ln in (enc.get("round_log") or [])[-30:]]
+    body.append("")
+    body.append("Narrate this briefly (exactly these results)" + (f", and end by turning to {nxt['name']}: what do they do?"
+                                                                   if nxt else "."))
+    queue_dm(ctx, "combat_auto", "\n".join(body))
+    return True
 
 
 def _resolve_shop(ctx: Ctx) -> None:
@@ -291,6 +390,10 @@ def _resolve_combat_timeout(ctx: Ctx, policy: str) -> None:
     enc = ctx.encounter
     if not enc:
         ctx.open_phase("exploration", ctx.phase.get("prompt"))
+        return
+    if enc.get("mode") == "classic":  # typed combat: the late player's character acts (AI or Dodge), then narrate
+        if not _auto_combat_turns(ctx, "ai" if policy == "ai" else "skip", only_away=False):
+            ctx.reset_deadline()
         return
     for cid, _ in ctx.living_party():
         tid = f"pc-{cid}"
@@ -479,8 +582,16 @@ async def run_dm(game_id: str) -> None:
             ctx.log("narration", result.text, "DM")
             ctx.state["pending_dm"] = None
             p_text = _prompt_from(result.text)
+            enc = ctx.encounter
+            if enc and enc.get("mode") == "classic":
+                enc["round_log"] = []  # the DM has narrated everything so far
+                enc.pop("round_complete", None)
             if toolbox.pending_rolls:
                 ctx.open_phase("roll", p_text, pending_rolls=toolbox.pending_rolls)
+            elif enc and enc.get("outcome"):
+                _finish_combat(ctx, enc["outcome"])
+            elif enc and enc.get("mode") == "classic":
+                _after_typed_dm(ctx, toolbox, p_text)
             elif ctx.encounter and not ctx.encounter.get("outcome"):
                 ctx.open_phase("combat", p_text)
                 if ctx.away_chars():
@@ -510,6 +621,36 @@ async def run_dm(game_id: str) -> None:
                 db.commit()
         finally:
             db.close()
+
+
+def _after_typed_dm(ctx: Ctx, toolbox: ToolBox, p_text: str | None) -> None:
+    """After the DM's response in typed combat: open the next player's turn, or finish a turn the DM left open."""
+    enc = ctx.encounter
+    declared = enc.get("declared")
+    if declared and not toolbox.ended_turn:
+        t = enc["tokens"].get(declared["tid"])
+        if toolbox.combat_steps == 0 and t and combat.can_act(enc, t["id"], ctx.chars):
+            enc.pop("declared", None)  # the DM asked them to clarify: same player, same turn
+        else:  # the DM resolved the action but forgot to end the turn: end it, and narrate what follows
+            lines = (combat.end_turn(enc, ctx.chars, t["id"]) if t and combat.can_act(enc, t["id"], ctx.chars)
+                     else combat.advance(enc, ctx.chars))
+            enc.pop("declared", None)
+            enc.pop("round_complete", None)
+            ctx.log_lines(lines)
+            if combat.check_end(enc, ctx.chars):
+                _finish_combat(ctx, enc["outcome"])
+                return
+            if lines:
+                nxt = turns.actor(enc, ctx.chars)
+                queue_dm(ctx, "combat_auto", "\n".join(
+                    ["What happened next (already resolved by the game):"] + [f"- {ln['text']}" for ln in lines] +
+                    ["", "Narrate this briefly (exactly these results)" +
+                     (f", and end by turning to {nxt['name']}: what do they do?" if nxt else ".")]))
+                return
+    ctx.open_phase("combat", p_text)
+    t = turns.actor(enc, ctx.chars)
+    if t and t["character_id"] in ctx.away_chars():
+        _auto_combat_turns(ctx, "ai", only_away=True)
 
 
 def retry_dm(ctx: Ctx, uid: str) -> None:

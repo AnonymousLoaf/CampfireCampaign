@@ -449,7 +449,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   sell_rate: 0.5,
   ruleset: "2014",
   rolls: "players",
-  combat_mode: "side",
+  combat_mode: "classic",
   narration_length: "medium",
   content_limits: "",
   round_timer_minutes: 1440,
@@ -490,7 +490,17 @@ export interface PendingRoll {
   label: string;
   dc: number | null;
   advantage: "normal" | "advantage" | "disadvantage";
-  result: null | { total: number; rolls: number[]; modifier: number; success: boolean | null };
+  result: null | {
+    total: number;
+    rolls: number[];
+    modifier: number;
+    success: boolean | null;
+    /** Typed combat: whether an attack roll hit, and the game's log lines for what the roll did. */
+    hit?: boolean;
+    lines?: string[];
+  };
+  /** Typed combat: an attack or spell the DM queued for this character; the roll resolves it. */
+  combat?: Record<string, unknown> | null;
 }
 
 export interface Phase {
@@ -565,7 +575,7 @@ export interface Token {
   portrait_url?: string | null;
 }
 
-export type Terrain = "road" | "forest" | "tavern" | "cave" | "dungeon" | "ruins" | "camp" | "swamp";
+export type Terrain = "road" | "forest" | "tavern" | "cave" | "dungeon" | "ruins" | "camp" | "swamp" | "town";
 
 export interface PointSpell {
   spell_index: string;
@@ -575,8 +585,9 @@ export interface PointSpell {
 
 export interface Encounter {
   round: number;
+  /** Fights use individual initiative ("classic"); "side" only appears in fights started before typed combat. */
   mode: "side" | "classic";
-  turn: { side: "party" | "monsters"; actor_id: string | null };
+  turn: { side: "party" | "monsters" | null; actor_id: string | null };
   grid: { w: number; h: number };
   cells: string[];
   terrain: Terrain;

@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
-import type { Encounter, SpellArea, Token } from "../api/types";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { Encounter, Token } from "../api/types";
 import { initials } from "../util/format";
 import { getCtx, useCanvasSize } from "./useCanvas";
-import { distanceFt, templateSquares } from "./combatUtil";
+import { distanceFt } from "./combatUtil";
 
 const TERRAIN_STYLE: Record<string, { floor: string; floorAlt: string; wall: string; obstacle: string; grid: string; difficult: string }> = {
   road: { floor: "#8b7b55", floorAlt: "#7d8a4e", wall: "#4b4238", obstacle: "#5b4a33", grid: "rgba(0,0,0,0.18)", difficult: "rgba(90,120,60,0.55)" },
@@ -16,44 +16,77 @@ const TERRAIN_STYLE: Record<string, { floor: string; floorAlt: string; wall: str
   town: { floor: "#86796a", floorAlt: "#7d7062", wall: "#5a3e2b", obstacle: "#4a3a2a", grid: "rgba(0,0,0,0.2)", difficult: "rgba(150,100,60,0.45)" },
 };
 
-/** Aiming state for area spells and targeted class features. */
-export interface Aim {
-  mode: "point" | "token";
-  origin: [number, number];
-  area: SpellArea | null;
-  range_ft: number | null;
-  point: [number, number] | null;
-  /** Which tokens are valid in token mode. */
-  tokenFilter?: "enemy" | "ally" | "any";
-  /** The acting token's kind, so "enemy"/"ally" can be resolved. */
-  actorKind?: "pc" | "monster";
+/** What a player could know about a creature on the map — shown when its token is clicked. Nothing here acts. */
+function TokenCard({ token, from, x, y, isActor, onClose }: { token: Token; from: Token | null; x: number; y: number; isActor: boolean; onClose: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ left: x + 12, top: y - 10 });
+  // Keep the card inside the map: flip left near the right edge, lift it near the bottom.
+  useLayoutEffect(() => {
+    const el = ref.current;
+    const parent = el?.offsetParent as HTMLElement | null;
+    if (!el || !parent) return;
+    let left = x + 12;
+    let top = y - 10;
+    if (left + el.offsetWidth > parent.clientWidth - 8) left = x - 12 - el.offsetWidth;
+    if (top + el.offsetHeight > parent.clientHeight - 8) top = parent.clientHeight - 8 - el.offsetHeight;
+    setPos({ left: Math.max(8, left), top: Math.max(8, top) });
+  }, [x, y]);
+  const isPc = token.kind === "pc";
+  const wounds = WOUNDS[token.hp_state] ?? cap(token.hp_state);
+  const dist = from && from.id !== token.id ? distanceFt(from, token) : null;
+  return (
+    <div className="token-card" ref={ref} style={pos} role="dialog" aria-label={token.name}>
+      <div className="token-card-head">
+        <span className="char-dot" style={{ background: token.color }} />
+        <strong>{token.name}</strong>
+        {isActor && <span className="badge gold">Their turn</span>}
+        <div className="grow" />
+        <button className="icon-btn tiny" onClick={onClose} aria-label="Close">
+          ✕
+        </button>
+      </div>
+      {isPc ? (
+        <div className="token-card-stats">
+          {token.hp !== null && token.hp_max !== null && (
+            <span>
+              HP <strong>{token.hp}</strong>/{token.hp_max}
+            </span>
+          )}
+          {token.ac !== null && (
+            <span>
+              AC <strong>{token.ac}</strong>
+            </span>
+          )}
+          {token.hp_state === "down" && <span className="badge red">Down</span>}
+          {token.hp_state === "dead" && <span className="badge red">Dead</span>}
+        </div>
+      ) : (
+        <div className="token-card-stats">
+          <span className={`badge ${token.hp_state === "bloodied" ? "red" : ""}`}>{wounds}</span>
+        </div>
+      )}
+      {token.conditions.length > 0 && <div className="small">{token.conditions.join(", ")}</div>}
+      {dist !== null && <div className="muted small">{dist} ft from you</div>}
+    </div>
+  );
 }
+
+const WOUNDS: Record<string, string> = { healthy: "Unhurt", bloodied: "Bloodied", dead: "Dead", down: "Down" };
 
 export default function BattleMap({
   encounter,
-  reachable,
-  targets,
   actorTokenId,
-  selectedTargetId,
-  onMove,
-  onTarget,
+  viewerTokenId,
   interactive = true,
-  aim,
-  onAimPoint,
-  onAimToken,
   portraits,
 }: {
   encounter: Encounter;
-  reachable?: [number, number][];
-  targets?: Encounter["targets"];
+  /** Whose turn it is — drawn with a gold ring so everyone can see. */
   actorTokenId?: string | null;
-  selectedTargetId?: string | null;
-  onMove?: (x: number, y: number) => void;
-  onTarget?: (token: Token, at: { x: number; y: number }) => void;
+  /** The viewer's own token, for "N ft from you" on the info card. */
+  viewerTokenId?: string | null;
+  /** false = no hover chips or info cards (TV view). */
   interactive?: boolean;
-  aim?: Aim | null;
-  onAimPoint?: (x: number, y: number) => void;
-  onAimToken?: (token: Token) => void;
   /** character_id → portrait URL; drawn clipped inside PC token circles. */
   portraits?: Record<string, string | null | undefined>;
 }) {
@@ -65,38 +98,26 @@ export default function BattleMap({
     return url ? portraitImage(url, () => setImgTick((n) => n + 1)) : null;
   };
   const [hover, setHover] = useState<{ x: number; y: number } | null>(null);
+  const [inspect, setInspect] = useState<{ id: string; x: number; y: number } | null>(null);
   const { w, h } = encounter.grid;
   const cell = Math.max(8, Math.floor(Math.min(size.w / w, size.h / h)));
   const ox = Math.floor((size.w - cell * w) / 2);
   const oy = Math.floor((size.h - cell * h) / 2);
   const style = TERRAIN_STYLE[encounter.terrain] ?? TERRAIN_STYLE.road;
 
-  const reachSet = useMemo(() => new Set((reachable ?? []).map(([x, y]) => `${x},${y}`)), [reachable]);
-  const targetSet = useMemo(() => new Set((targets ?? []).map((t) => t.token_id)), [targets]);
   const propMap = useMemo(() => new Map((encounter.props ?? []).map((p) => [`${p.x},${p.y}`, p.kind])), [encounter.props]);
-
-  // Aiming helpers.
-  const inAimRange = (x: number, y: number) =>
-    !!aim && (aim.range_ft === null || distanceFt({ x: aim.origin[0], y: aim.origin[1] }, { x, y }) <= Math.max(5, aim.range_ft));
-  const aimTokenOk = (t: Token) => {
-    if (!aim || aim.mode !== "token" || t.hp_state === "dead") return false;
-    const enemy = t.kind !== (aim.actorKind ?? "pc");
-    if (aim.tokenFilter === "enemy" && !enemy) return false;
-    if (aim.tokenFilter === "ally" && enemy) return false;
-    return inAimRange(t.x, t.y);
-  };
-  const aimFocus: [number, number] | null =
-    aim?.mode === "point" ? aim.point ?? (hover && inAimRange(hover.x, hover.y) ? [hover.x, hover.y] : null) : null;
-  const templateSet = useMemo(() => {
-    if (!aim || aim.mode !== "point" || !aimFocus) return new Set<string>();
-    return new Set(templateSquares(encounter, aim.area, aim.origin, aimFocus).map(([x, y]) => `${x},${y}`));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [aim, aimFocus?.[0], aimFocus?.[1], encounter]);
   const legend = useMemo(() => {
     const kinds = [...new Set((encounter.props ?? []).map((p) => p.kind))];
     const hasDifficult = encounter.cells.some((r) => r.includes("~"));
     return { kinds, hasDifficult };
   }, [encounter.props, encounter.cells]);
+  const inspected = inspect ? encounter.tokens.find((t) => t.id === inspect.id) ?? null : null;
+  const viewer = viewerTokenId ? encounter.tokens.find((t) => t.id === viewerTokenId) ?? null : null;
+
+  // Close the info card if its creature leaves the map.
+  useEffect(() => {
+    if (inspect && !inspected) setInspect(null);
+  }, [inspect, inspected]);
 
   useEffect(() => {
     const ctx = getCtx(canvasRef.current);
@@ -144,55 +165,17 @@ export default function BattleMap({
       }
     }
 
-    // Reachable squares.
-    if (reachSet.size) {
-      // A cool blue reads on every terrain (green grass, brown wood, grey stone).
-      ctx.fillStyle = "rgba(90, 170, 255, 0.30)";
-      ctx.strokeStyle = "rgba(170, 215, 255, 0.85)";
-      ctx.lineWidth = 1;
-      for (const k of reachSet) {
-        const [x, y] = k.split(",").map(Number);
-        ctx.fillRect(ox + x * cell + 1, oy + y * cell + 1, cell - 2, cell - 2);
-        ctx.strokeRect(ox + x * cell + 1.5, oy + y * cell + 1.5, cell - 3, cell - 3);
-      }
-    }
-    if (hover && reachSet.has(`${hover.x},${hover.y}`)) {
-      ctx.strokeStyle = "#cfe6ff";
-      ctx.lineWidth = 2;
-      ctx.strokeRect(ox + hover.x * cell + 2, oy + hover.y * cell + 2, cell - 4, cell - 4);
-    }
-
-    // Aiming overlay: range, then the template.
-    if (aim?.mode === "point") {
-      ctx.fillStyle = "rgba(255, 215, 120, 0.10)";
-      for (let y = 0; y < h; y++)
-        for (let x = 0; x < w; x++) if ((encounter.cells[y]?.[x] ?? " ") !== " " && inAimRange(x, y)) ctx.fillRect(ox + x * cell, oy + y * cell, cell, cell);
-      ctx.fillStyle = "rgba(255, 120, 40, 0.38)";
-      ctx.strokeStyle = "rgba(255, 170, 90, 0.95)";
-      ctx.lineWidth = 1;
-      for (const k of templateSet) {
-        const [x, y] = k.split(",").map(Number);
-        ctx.fillRect(ox + x * cell + 1, oy + y * cell + 1, cell - 2, cell - 2);
-        ctx.strokeRect(ox + x * cell + 1.5, oy + y * cell + 1.5, cell - 3, cell - 3);
-      }
-      if (aimFocus) {
-        ctx.strokeStyle = "#fff2c4";
-        ctx.lineWidth = 2;
-        ctx.strokeRect(ox + aimFocus[0] * cell + 2, oy + aimFocus[1] * cell + 2, cell - 4, cell - 4);
-      }
-    }
-
     // Tokens.
     const sorted = [...encounter.tokens].sort((a, b) => (a.hp_state === "dead" ? -1 : 0) - (b.hp_state === "dead" ? -1 : 0));
     for (const t of sorted) drawToken(ctx, t, ox + t.x * cell, oy + t.y * cell, cell * (t.size || 1), {
       actor: t.id === actorTokenId,
-      target: aim?.mode === "token" ? aimTokenOk(t) : targetSet.has(t.id),
-      selected: t.id === selectedTargetId,
+      target: false,
+      selected: t.id === inspect?.id,
       hovered: !!hover && hover.x === t.x && hover.y === t.y,
-      inTemplate: templateSet.has(`${t.x},${t.y}`),
+      inTemplate: false,
     }, portraitFor(t));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [encounter, size, cell, ox, oy, w, h, style, reachSet, targetSet, propMap, actorTokenId, selectedTargetId, hover, canvasRef, aim, templateSet, portraits, imgTick]);
+  }, [encounter, size, cell, ox, oy, w, h, style, propMap, actorTokenId, inspect?.id, hover, canvasRef, portraits, imgTick]);
 
   const squareAt = (e: React.MouseEvent) => {
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -202,6 +185,7 @@ export default function BattleMap({
     return { x, y };
   };
 
+  // Clicking a creature shows what you could know about it. Nothing on the map acts: you type what you do.
   const onClick = (e: React.MouseEvent) => {
     if (!interactive) return;
     const sq = squareAt(e);
@@ -209,17 +193,12 @@ export default function BattleMap({
     // On touch screens there is no hover: a tap also shows what's on the square.
     if (!hover || hover.x !== sq.x || hover.y !== sq.y) setHover(sq);
     const tok = encounter.tokens.find((t) => t.x === sq.x && t.y === sq.y && t.hp_state !== "dead");
-    if (aim) {
-      if (aim.mode === "point" && inAimRange(sq.x, sq.y) && onAimPoint) onAimPoint(sq.x, sq.y);
-      else if (aim.mode === "token" && tok && aimTokenOk(tok) && onAimToken) onAimToken(tok);
-      return;
-    }
-    if (tok && onTarget && targetSet.has(tok.id)) {
+    if (tok) {
       const rect = canvasRef.current!.getBoundingClientRect();
-      onTarget(tok, { x: e.clientX - rect.left, y: e.clientY - rect.top });
-      return;
+      setInspect(inspect?.id === tok.id ? null : { id: tok.id, x: e.clientX - rect.left, y: e.clientY - rect.top });
+    } else {
+      setInspect(null);
     }
-    if (reachSet.has(`${sq.x},${sq.y}`) && onMove) onMove(sq.x, sq.y);
   };
 
   const hoverTok = hover ? encounter.tokens.find((t) => t.x === hover.x && t.y === hover.y) : undefined;
@@ -248,28 +227,12 @@ export default function BattleMap({
           else if (!hover || hover.x !== sq.x || hover.y !== sq.y) setHover(sq);
         }}
         onMouseLeave={() => setHover(null)}
-        style={{
-          cursor:
-            interactive && aim
-              ? aim.mode === "point"
-                ? hover && inAimRange(hover.x, hover.y)
-                  ? "crosshair"
-                  : "not-allowed"
-                : hoverTok && aimTokenOk(hoverTok)
-                  ? "pointer"
-                  : "default"
-              : interactive && hover && (reachSet.has(`${hover.x},${hover.y}`) || (hoverTok && targetSet.has(hoverTok.id)))
-                ? "pointer"
-                : "default",
-          touchAction: "manipulation",
-        }}
+        style={{ cursor: interactive && hoverTok && hoverTok.hp_state !== "dead" ? "pointer" : "default", touchAction: "manipulation" }}
       />
-      {hoverTok && interactive && (
+      {hoverTok && interactive && !inspected && (
         <div className="map-overlay top-left">
           <span className="map-chip">
-            {hoverTok.name}
-            {hoverTok.hp !== null && hoverTok.hp_max !== null ? ` · HP ${hoverTok.hp}/${hoverTok.hp_max}` : ` · ${hoverTok.hp_state}`}
-            {hoverTok.ac !== null ? ` · AC ${hoverTok.ac}` : ""}
+            {hoverTok.name} · {hoverTok.kind === "pc" ? (hoverTok.hp !== null && hoverTok.hp_max !== null ? `HP ${hoverTok.hp}/${hoverTok.hp_max}` : hoverTok.hp_state) : WOUNDS[hoverTok.hp_state] ?? hoverTok.hp_state}
             {hoverTok.conditions.length ? ` · ${hoverTok.conditions.join(", ")}` : ""}
           </span>
         </div>
@@ -278,6 +241,9 @@ export default function BattleMap({
         <div className="map-overlay top-left">
           <span className="map-chip">{hoverTerrain}</span>
         </div>
+      )}
+      {inspected && inspect && interactive && (
+        <TokenCard token={inspected} from={viewer} x={inspect.x} y={inspect.y} isActor={inspected.id === actorTokenId} onClose={() => setInspect(null)} />
       )}
       {(legend.kinds.length > 0 || legend.hasDifficult) && (
         <div className="map-overlay bottom-left">
@@ -813,9 +779,10 @@ function drawToken(
     ctx.stroke();
   }
   if (flags.target || flags.selected) {
-    ctx.strokeStyle = flags.selected ? "#ff5a4a" : "rgba(255, 90, 74, 0.7)";
-    ctx.lineWidth = flags.selected ? 3 : 2;
-    ctx.setLineDash(flags.selected ? [] : [4, 3]);
+    // selected = the token whose info card is open (a neutral ring, not a target marker)
+    ctx.strokeStyle = flags.selected ? "rgba(235, 240, 255, 0.9)" : "rgba(255, 90, 74, 0.7)";
+    ctx.lineWidth = 2;
+    ctx.setLineDash(flags.selected ? [3, 3] : [4, 3]);
     ctx.beginPath();
     ctx.arc(cx, cy, r + (flags.actor ? 7 : 4), 0, Math.PI * 2);
     ctx.stroke();

@@ -84,7 +84,8 @@ class OfflineEngine:
                            "forest" if any(w in text for w in ("forest", "woods", "trees")) else "road")
                 foe = {"tavern": "Bandit", "cave": "Skeleton", "forest": "Wolf", "dungeon": "Skeleton",
                        "ruins": "Zombie", "swamp": "Giant Frog", "camp": "Bandit"}.get(terrain, "Goblin")
-                call_tool("start_combat", {"monsters": [{"name": foe, "count": max(2, party)}], "terrain": terrain})
+                call_tool("start_combat", {"monsters": [{"name": foe, "count": max(2, party)}], "terrain": terrain,
+                                           "distance": "near"})
                 out.append(f"Steel flashes — {foe.lower()}s, and they mean business. Fight!")
             elif any(w in text for w in ("rest", "sleep", "camp")):
                 call_tool("rest", {"kind": "long"})
@@ -97,6 +98,19 @@ class OfflineEngine:
             for who, what in acts:
                 out.append(f"{who.split(' (')[0]}: {what[:120]} — the world takes note.")
             out.append("The road east waits, and the barking hasn't stopped. What next?")
+        elif reason == "combat_turn":
+            out += _offline_combat_turn(body, call_tool)
+        elif reason == "combat_rolls":
+            lines = [l[2:].strip() for l in body.splitlines() if l.startswith("- ")]
+            out.append(" ".join(lines))
+            res = call_tool("combat_end_turn", {})
+            out.append(_offline_after_turn(res))
+        elif reason == "combat_auto":
+            lines = [l[2:].strip() for l in body.splitlines() if l.startswith("- ")]
+            nxt = re.search(r"turning to ([^:]+):", body)
+            out.append("Steel rings and boots scrape. " + " ".join(lines[-4:]))
+            if nxt:
+                out.append(f"{nxt.group(1)}, what do you do?")
         elif reason in ("combat_round", "combat_end"):
             lines = [l[2:].strip() for l in body.splitlines() if l.startswith("- ")]
             out.append("Steel rings and boots scrape. " + " ".join(lines[-4:]))
@@ -111,6 +125,76 @@ class OfflineEngine:
         else:
             out.append("The world turns. What do you do?")
         return EngineResult(text="\n\n".join(out), duration_ms=int((time.monotonic() - t0) * 1000), model="offline")
+
+
+def _offline_after_turn(res: str) -> str:
+    """Turn a combat_end_turn result into scripted narration."""
+    lines = [l[2:].strip() for l in res.splitlines() if l.startswith("- ")]
+    nxt = re.search(r"Now it is (.+?)'s turn", res)
+    text = ("Then: " + " ".join(lines[-4:]) + " ") if lines and lines != ["(nothing else happened)"] else ""
+    if "fight is over" in res:
+        return text + "The fighting stops."
+    return text + (f"{nxt.group(1)}, what do you do?" if nxt else "What next?")
+
+
+def _offline_combat_turn(body: str, call_tool: ToolCaller) -> list[str]:
+    """A scripted reading of a typed combat turn: dodge/dash/disengage, or move to the named (or nearest) enemy
+    and attack it with the weapon the player mentions (or their first one)."""
+    said = re.search(r'player says: "(.+?)"\s*\n', body, re.S)
+    text = (said.group(1) if said else "").lower()
+    who = re.search(r"\n(.+?)'s turn\. Movement left", body)
+    name = who.group(1) if who else "You"
+    foes = re.findall(r"^[1-9a-z] (.+?) at \((\d+),(\d+)\), (\d+) ft away", body, re.M)
+    weapons = []  # (name, id, how, reach_ft, max_ft)
+    for wl in re.findall(r"^- .+? \(id [\w-]+\): [+-]\d+ to hit, .*$", body, re.M):
+        m = re.match(r"^- (.+?) \(id ([\w-]+)\)", wl)
+        rng = re.search(r"range (\d+)/(\d+)", wl)
+        reach = re.search(r"reach (\d+)", wl)
+        thrown = re.search(r"thrown (\d+)", wl)
+        if rng:
+            weapons.append((m.group(1), m.group(2), "range", int(rng.group(1)), int(rng.group(2))))
+        elif reach:
+            weapons.append((m.group(1), m.group(2), "reach", int(reach.group(1)),
+                            int(thrown.group(1)) if thrown else int(reach.group(1))))
+    for act in ("dodge", "dash", "disengage"):
+        if act in text:
+            call_tool("combat_action", {"action": act})
+            res = call_tool("combat_end_turn", {})
+            return [f"(Offline test DM.) {name} {act}s.", _offline_after_turn(res)]
+    if not foes:
+        res = call_tool("combat_end_turn", {})
+        return [f"{name} looks around — no enemy in sight.", _offline_after_turn(res)]
+    target = next((f for f in foes if f[0].lower() in text or f[0].split()[0].lower() in text), None) \
+        or min(foes, key=lambda f: int(f[3]))
+    if not weapons:
+        call_tool("combat_action", {"action": "other", "note": text[:200]})
+        res = call_tool("combat_end_turn", {})
+        return [f"{name} improvises.", _offline_after_turn(res)]
+    d = int(target[3])
+    named = [w for w in weapons if w[0].split()[0].lower() in text]
+    melee = [w for w in weapons if w[2] == "reach"]
+    in_reach = [w for w in named + weapons if d <= w[3]]
+    can_reach = [w for w in named + weapons if d <= w[4]]
+    if in_reach:
+        weapon = in_reach[0]
+    elif melee and d - 30 <= melee[0][3]:  # close enough to walk up and swing
+        weapon = melee[0]
+        call_tool("combat_move", {"toward": target[0], "stop_within_ft": weapon[3]})
+    elif can_reach:
+        weapon = can_reach[0]  # throw or shoot from here
+    else:
+        call_tool("combat_action", {"action": "dash"})
+        call_tool("combat_move", {"toward": target[0], "stop_within_ft": 5})
+        res = call_tool("combat_end_turn", {})
+        return [f"(Offline test DM.) {name} dashes toward {target[0]}.", _offline_after_turn(res)]
+    res = call_tool("combat_attack", {"target": target[0], "weapon": weapon[1]})
+    if res.startswith("Roll requested"):
+        return [f"(Offline test DM.) {name} goes for {target[0]} with the {weapon[0].lower()}. Roll to hit!"]
+    if res.startswith("Error"):
+        res2 = call_tool("combat_end_turn", {})
+        return [f"{name} can't reach {target[0]} this turn ({res[7:]}).", _offline_after_turn(res2)]
+    end = call_tool("combat_end_turn", {})
+    return [res.replace("Resolved: ", ""), _offline_after_turn(end)]
 
 
 class ApiKeyEngine:

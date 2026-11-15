@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
-import type { GameView, Me, Token, TravelTo } from "../api/types";
+import type { GameView, Me, TravelTo } from "../api/types";
 import { subscribe } from "../api/ws";
 import { navigate } from "../router";
-import { GameContext, controlsOf, useGame, type GameCtx } from "../components/game/gameContext";
+import { GameContext, controlsOf, type GameCtx } from "../components/game/gameContext";
 import GameHeader from "../components/game/GameHeader";
 import PartyPanel from "../components/game/PartyPanel";
 import StoryFeed from "../components/game/StoryFeed";
@@ -11,9 +11,9 @@ import SheetTabs from "../components/game/SheetTabs";
 import ShopModal from "../components/game/ShopModal";
 import HostSettingsModal from "../components/game/HostSettingsModal";
 import TvLinkModal from "../components/game/TvLinkModal";
-import { CombatComposer, ExplorationComposer, RollComposer, ShopComposer, type Armed, type CombatState } from "../components/game/Composer";
+import { CombatComposer, CombatTurnBanner, ExplorationComposer, RollComposer, ShopComposer } from "../components/game/Composer";
 import WorldMap from "../maps/WorldMap";
-import BattleMap, { type Aim } from "../maps/BattleMap";
+import BattleMap from "../maps/BattleMap";
 import LevelUpModal from "../components/LevelUpModal";
 import AwayControl from "../components/game/AwayControl";
 import CatchUp from "../components/game/CatchUp";
@@ -131,12 +131,8 @@ function GameLoaded({
   const [mapTab, setMapTab] = useState<"world" | "battle">(view.encounter ? "battle" : "world");
   const [destination, setDestination] = useState<TravelTo>(null);
   const [destLabel, setDestLabel] = useState<string | null>(null);
-  const [selectedTargetId, setSelectedTargetId] = useState<string | null>(null);
-  const [targetMenu, setTargetMenu] = useState<{ token: Token; x: number; y: number } | null>(null);
   const [modal, setModal] = useState<null | "shop" | "settings" | "tv">(null);
   const [levelUpFor, setLevelUpFor] = useState<string | null>(null);
-  const [armed, setArmedState] = useState<Armed | null>(null);
-  const [aimPoint, setAimPoint] = useState<[number, number] | null>(null);
   const isMobile = useIsMobile();
   const [mobileTab, setMobileTab] = useState<MobileTab>("story");
   const [feedTab, setFeedTab] = useState<"live" | "story">("live");
@@ -162,15 +158,6 @@ function GameLoaded({
         markedRef.current = null;
       });
   };
-  const setArmed = (a: Armed | null) => {
-    setArmedState(a);
-    setAimPoint(null);
-    if (a) {
-      setSelectedTargetId(null);
-      setTargetMenu(null);
-    }
-  };
-
   // Keep the acting character valid.
   useEffect(() => {
     if (!actingId || !controls.includes(actingId)) setActingId(view.me.character_id && controls.includes(view.me.character_id) ? view.me.character_id : controls[0] ?? null);
@@ -180,8 +167,6 @@ function GameLoaded({
   const hasEncounter = !!view.encounter;
   useEffect(() => {
     setMapTab(hasEncounter ? "battle" : "world");
-    setSelectedTargetId(null);
-    setTargetMenu(null);
     if (hasEncounter && isMobile && !spectator) setMobileTab("map");
   }, [hasEncounter]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -201,23 +186,9 @@ function GameLoaded({
     if (!view.phase.my_submission?.travel_to) setDestLabel(null);
   }, [view.phase.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Combat: which token I act with, and what it can do.
+  // Combat is typed: whoever's turn it is describes what they do. Track only whose turn it is.
   const enc = view.encounter;
-  const combat: CombatState = useMemo(() => {
-    const empty: CombatState = { activeToken: null, canAct: false, reachable: [], targets: [], budget: null };
-    if (!enc || view.phase.type !== "combat") return empty;
-    const mine = enc.tokens.filter((t) => t.kind === "pc" && t.character_id && controls.includes(t.character_id));
-    let active: Token | null = null;
-    if (enc.mode === "classic") {
-      active = mine.find((t) => t.id === enc.turn.actor_id) ?? mine.find((t) => t.character_id === actingId) ?? null;
-    } else {
-      active = mine.find((t) => t.character_id === actingId) ?? mine.find((t) => t.id === enc.my_token_id) ?? null;
-    }
-    // The server computes moves/targets/budget for the character I'm acting as (my_token_id).
-    const canAct = !!active && enc.my_turn && enc.my_token_id === active.id;
-    if (!active || !canAct) return { ...empty, activeToken: active };
-    return { activeToken: active, canAct, reachable: enc.reachable, targets: enc.targets, budget: enc.budget };
-  }, [enc, view.phase.type, controls, actingId]);
+  const myTurn = !!enc && view.phase.type === "combat" && enc.my_turn && !!enc.my_token_id;
 
   // Tell the loader who I'm acting as, so the next view is computed for that character.
   useEffect(() => {
@@ -231,11 +202,11 @@ function GameLoaded({
     if (t?.character_id && t.character_id !== actingId && controls.includes(t.character_id)) setActingId(t.character_id);
   }, [enc?.my_token_id, enc?.my_turn]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // In classic initiative, follow whichever of my characters is up.
+  // Individual initiative: follow whichever of my characters is up.
   useEffect(() => {
-    const cid = combat.activeToken?.character_id;
-    if (enc?.mode === "classic" && cid && cid !== actingId && controls.includes(cid)) setActingId(cid);
-  }, [combat.activeToken, enc?.mode, actingId, controls]);
+    const cid = enc?.tokens.find((t) => t.id === enc.turn.actor_id)?.character_id;
+    if (cid && cid !== actingId && controls.includes(cid)) setActingId(cid);
+  }, [enc?.turn.actor_id, actingId, controls]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const ctx: GameCtx = {
     view,
@@ -253,24 +224,8 @@ function GameLoaded({
     openLevelUp: (id) => setLevelUpFor(id),
   };
 
-  // Drop any half-finished aim when the turn, round or acting character changes.
-  const aimKey = `${view.phase.id}|${enc?.round}|${enc?.turn.actor_id}|${enc?.turn.side}|${combat.activeToken?.id}|${combat.canAct}`;
-  useEffect(() => {
-    setArmedState(null);
-    setAimPoint(null);
-  }, [aimKey]);
-
-  const aim: Aim | null = (() => {
-    const tok = combat.activeToken;
-    if (!armed || !tok || !combat.canAct) return null;
-    if (armed.kind === "spell")
-      return { mode: "point", origin: [tok.x, tok.y], area: armed.ps.area, range_ft: armed.ps.range_ft, point: aimPoint };
-    const a = armed.action;
-    if (a.target === "point") return { mode: "point", origin: [tok.x, tok.y], area: null, range_ft: a.range_ft, point: aimPoint };
-    return { mode: "token", origin: [tok.x, tok.y], area: null, range_ft: a.range_ft, point: null, tokenFilter: a.target === "ally" ? "ally" : "enemy", actorKind: tok.kind };
-  })();
-
-  const selectedTarget = enc?.tokens.find((t) => t.id === selectedTargetId) ?? null;
+  // My own token on the battle map (for "N ft from you" on the info card).
+  const viewerTokenId = enc?.tokens.find((t) => t.kind === "pc" && t.character_id === (actingId ?? view.me.character_id))?.id ?? null;
   const canPickTravel = view.phase.type === "exploration" && (view.game.settings.input_mode !== "single" || !!view.me.is_speaker || (view.me.is_host && !view.game.settings.speaker_id));
 
   const composer = (() => {
@@ -307,22 +262,11 @@ function GameLoaded({
       case "shop":
         return <ShopComposer onOpenShop={() => setModal("shop")} />;
       case "combat":
-        return enc ? (
-          <CombatComposer
-            combat={combat}
-            selectedTarget={selectedTarget}
-            clearTarget={() => {
-              setSelectedTargetId(null);
-              setTargetMenu(null);
-            }}
-            armed={aim ? armed : null}
-            setArmed={setArmed}
-            aimPoint={aimPoint}
-          />
-        ) : null;
+        return enc ? <CombatComposer /> : null;
       case "dm":
         return (
           <div className="composer">
+            {enc && <CombatTurnBanner writing />}
             <div className="log-writing">
               <span className="quill">✒</span> The DM is writing… you'll be notified when it's your move.
             </div>
@@ -338,7 +282,6 @@ function GameLoaded({
     }
   })();
 
-  const actingChar = actingId ? view.characters[actingId] : undefined;
 
   const partyEl = (
     <>
@@ -436,50 +379,7 @@ function GameLoaded({
                   <div className="map-empty muted">The world map appears when the game starts.</div>
                 ))}
               {mapTab === "battle" && enc && (
-                <>
-                  <BattleMap
-                    encounter={enc}
-                    portraits={portraits}
-                    reachable={combat.canAct && (!combat.budget || combat.budget.move_ft > 0) ? combat.reachable : []}
-                    targets={combat.canAct ? combat.targets : []}
-                    actorTokenId={enc.turn.actor_id ?? combat.activeToken?.id ?? null}
-                    selectedTargetId={selectedTargetId}
-                    interactive={!spectator}
-                    onMove={(x, y) => void run(() => api.move(gameId, x, y, ctx.charParam))}
-                    onTarget={(tok, at) => {
-                      setSelectedTargetId(tok.id);
-                      setTargetMenu({ token: tok, x: at.x, y: at.y });
-                    }}
-                    aim={aim}
-                    onAimPoint={(x, y) => setAimPoint([x, y])}
-                    onAimToken={(tok) => {
-                      if (armed?.kind !== "feature") return;
-                      const a = armed.action;
-                      void run(() => api.feature(gameId, a.id, { target_id: tok.id }, ctx.charParam)).then((ok) => ok && setArmed(null));
-                    }}
-                  />
-                  {targetMenu && actingChar && (
-                    <TargetMenu
-                      token={targetMenu.token}
-                      x={targetMenu.x}
-                      y={targetMenu.y}
-                      combat={combat}
-                      onClose={() => setTargetMenu(null)}
-                      onAttack={(attackId) =>
-                        void run(() => api.attack(gameId, attackId, targetMenu.token.id, ctx.charParam)).then(() => {
-                          setTargetMenu(null);
-                          setSelectedTargetId(null);
-                        })
-                      }
-                      onCast={(spell) =>
-                        void run(() => api.cast(gameId, spell, targetMenu.token.id, undefined, ctx.charParam)).then(() => {
-                          setTargetMenu(null);
-                          setSelectedTargetId(null);
-                        })
-                      }
-                    />
-                  )}
-                </>
+                <BattleMap encounter={enc} portraits={portraits} actorTokenId={enc.turn.actor_id} viewerTokenId={viewerTokenId} interactive />
               )}
             </div>
     </section>
@@ -487,7 +387,7 @@ function GameLoaded({
 
   const mobileTabs: { id: MobileTab; label: string; icon: string; badge?: number | string }[] = [
     { id: "story", label: "Story", icon: "📜", badge: (view.me.unseen_count ?? 0) > 0 ? view.me.unseen_count : undefined },
-    { id: "map", label: enc ? "Battle" : "Map", icon: enc ? "⚔" : "🗺", badge: combat.canAct ? "!" : undefined },
+    { id: "map", label: enc ? "Battle" : "Map", icon: enc ? "⚔" : "🗺", badge: myTurn ? "!" : undefined },
     { id: "party", label: "Party", icon: "👥" },
     {
       id: "sheet",
@@ -563,73 +463,5 @@ function GameLoaded({
         <DiceRoller />
       </div>
     </GameContext.Provider>
-  );
-}
-
-function TargetMenu({
-  token,
-  x,
-  y,
-  combat,
-  onClose,
-  onAttack,
-  onCast,
-}: {
-  token: Token;
-  x: number;
-  y: number;
-  combat: CombatState;
-  onClose: () => void;
-  onAttack: (id: string) => void;
-  onCast: (index: string) => void;
-}) {
-  const { view, acting } = useGame();
-  const menuRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ left: Math.max(8, x + 12), top: Math.max(8, y - 10) });
-  // Keep the menu inside the map: flip to the left of the cursor near the right edge, lift it near the bottom.
-  useLayoutEffect(() => {
-    const el = menuRef.current;
-    const parent = el?.offsetParent as HTMLElement | null;
-    if (!el || !parent) return;
-    let left = x + 12;
-    let top = y - 10;
-    if (left + el.offsetWidth > parent.clientWidth - 8) left = x - 12 - el.offsetWidth;
-    if (top + el.offsetHeight > parent.clientHeight - 8) top = parent.clientHeight - 8 - el.offsetHeight;
-    setPos({ left: Math.max(8, left), top: Math.max(8, top) });
-  }, [x, y]);
-  const t = combat.targets.find((z) => z.token_id === token.id);
-  if (!t || !acting) return null;
-  const actionUsed = combat.budget ? !combat.budget.action : false;
-  const spells = [...(acting.spellcasting?.cantrips ?? []), ...(acting.spellcasting?.spells ?? [])];
-  return (
-    <div className="target-menu" ref={menuRef} style={pos} onMouseLeave={onClose}>
-      <div className="target-menu-head">
-        <strong>{token.name}</strong>
-        <button className="icon-btn tiny" onClick={onClose}>
-          ✕
-        </button>
-      </div>
-      {actionUsed && <div className="muted small">Action used this turn.</div>}
-      {t.attack_ids.map((id) => {
-        const a = acting.attacks.find((z) => z.id === id);
-        if (!a) return null;
-        return (
-          <button key={id} className="menu-item" disabled={actionUsed} onClick={() => onAttack(id)}>
-            ⚔ {a.name} <span className="muted small">{a.to_hit >= 0 ? "+" : ""}{a.to_hit} · {a.damage}</span>
-          </button>
-        );
-      })}
-      {t.spell_indexes.map((idx) => {
-        const s = spells.find((z) => z.index === idx);
-        if (!s) return null;
-        return (
-          <button key={idx} className="menu-item" disabled={actionUsed} onClick={() => onCast(idx)}>
-            ✧ {s.name} <span className="muted small">{s.level === 0 ? "cantrip" : `L${s.level}`}</span>
-          </button>
-        );
-      })}
-      {t.attack_ids.length === 0 && t.spell_indexes.length === 0 && <div className="muted small">Nothing reaches {token.name} from here.</div>}
-      <div className="muted small">{view.encounter?.tokens.find((z) => z.id === token.id)?.hp_state}</div>
-    </div>
   );
 }

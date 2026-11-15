@@ -286,6 +286,9 @@ Email and web-push notifications with deadline reminders, vacation mode, phone l
 ### M4 — Atmosphere ✅ built
 Scene backgrounds and an animated sky, synthesized ambience and sound effects, spoken narration (browser voices), dice animations, uploaded or generated portraits — plus a private custom content library (homebrew / owned books) and the D&D Beyond 2024 import fixes.
 
+### After M4 — Typed combat ✅ built
+Decided after the first Claude Code DM playthrough: combat stays true to tabletop D&D. Players never click to attack, move or cast; on their turn they type what their character does, and the DM resolves it with turn-scoped tools (move, attack, cast, feature, action, end turn) while the game enforces the rules. Players roll their own dice through roll requests. Fights use individual initiative, one character at a time, because each move changes the next; exploration decisions stay asynchronous for the whole party. Clicking a creature shows only what the character could know. Also: a town battle map, start distance (close/near/far), and the DM is told the real combat results so its narration matches the dice.
+
 ### M5 — Going public
 Hosted server (Postgres, cloud), Google/Discord login, bring-your-own-key and/or billing, open lobbies to play with strangers, moderation and reporting, rate limits, content audit (SRD only), published source (AGPL), terms of service and privacy policy.
 

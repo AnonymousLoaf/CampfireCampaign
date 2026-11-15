@@ -727,3 +727,91 @@
 .import-custom li {
   margin: 2px 0;
 }
+
+/* ── Typed combat: token info card and read-only reference card ── */
+.token-card {
+  position: absolute;
+  z-index: 20;
+  background: var(--panel);
+  border: 1px solid var(--border-2);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 8px 10px;
+  min-width: 180px;
+  max-width: min(260px, calc(100% - 16px));
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.88rem;
+}
+.token-card-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.token-card-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: center;
+}
+.combat-ref {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(0, 0, 0, 0.18);
+  font-size: 0.82rem;
+}
+.combat-ref-wrap > summary {
+  cursor: pointer;
+  color: var(--text-dim);
+  margin-top: 4px;
+}
+.ref-section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ref-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+.ref-label .muted {
+  text-transform: none;
+  letter-spacing: 0;
+}
+.ref-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+}
+.ref-feats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.ref-chip {
+  font-size: 0.78rem;
+  padding: 0.1em 0.55em;
+  border-radius: 999px;
+  border: 1px solid var(--border-2);
+  white-space: nowrap;
+}
+.ref-chip.used {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.roll-lines {
+  flex-basis: 100%;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+.roll-result {
+  flex-wrap: wrap;
+}

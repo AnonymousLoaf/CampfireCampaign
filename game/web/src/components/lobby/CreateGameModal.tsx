@@ -63,10 +63,6 @@ export const ROLLS: Opt<GameSettings["rolls"]>[] = [
   { value: "players", label: "Players roll on the site" },
   { value: "auto", label: "Automatic" },
 ];
-export const COMBAT: Opt<GameSettings["combat_mode"]>[] = [
-  { value: "side", label: "Side initiative", hint: "Party acts together, then monsters — best for async" },
-  { value: "classic", label: "Classic initiative", hint: "One turn at a time — best for live play" },
-];
 export const NARRATION: Opt<GameSettings["narration_length"]>[] = [
   { value: "short", label: "Short" },
   { value: "medium", label: "Medium" },
@@ -341,7 +337,7 @@ export default function CreateGameModal({
             <Seg options={ROLLS} value={s.rolls} onChange={(v) => set("rolls", v)} />
           </Field>
           <Field label="Combat">
-            <Seg options={COMBAT} value={s.combat_mode} onChange={(v) => set("combat_mode", v)} />
+            <div className="muted small">Fights go in initiative order, one character at a time. On your turn you type what you do; the DM moves tokens and asks for your rolls.</div>
           </Field>
           <Field label="Narration length">
             <Seg options={NARRATION} value={s.narration_length} onChange={(v) => set("narration_length", v)} />

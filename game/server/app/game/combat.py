@@ -478,8 +478,11 @@ def resolve_attack(enc: dict, chars: dict, att: dict, tgt: dict, *, name: str, t
     hit = r["natural"] == 20 or (r["natural"] != 1 and r["total"] >= ac)
     crit = hit and (r["natural"] >= crit_on or auto_crit)
     adv_txt = {"advantage": " (adv)", "disadvantage": " (dis)"}.get(adv, "")
-    head = f"{att['name']} attacks {tgt['name']} with {name}: {r['total']}{adv_txt} vs AC {ac}"
-    data = {"attacker": att["id"], "target": tgt["id"], "roll": r, "ac": ac, "hit": hit, "crit": crit,
+    # Players don't see a monster's AC (the DM has it); a character's own AC is no secret.
+    vs = f" vs AC {ac}" if tgt["kind"] == "pc" else ""
+    head = f"{att['name']} attacks {tgt['name']} with {name}: {r['total']}{adv_txt}{vs}"
+    data = {"attacker": att["id"], "target": tgt["id"], "roll": r, "ac": ac if tgt["kind"] == "pc" else None,
+            "hit": hit, "crit": crit,
             "attack": name, "damage_type": dtype, "ranged": ranged, "spell": spell}
     if not hit:
         out = [line(head + " — miss.", "combat", **data)]

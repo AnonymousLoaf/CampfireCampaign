@@ -414,3 +414,14 @@ Per user, private. Lets players add backgrounds, feats, subclass features, speci
 
 - 2024 characters are detected (non-legacy species/background) and import as `ruleset: "2024"`; others as 2014. The import result gains `ruleset`.
 - Features, feats, species traits and subclass features from the D&D Beyond sheet that the game's tables don't cover are kept as custom entries attached to the character (their descriptions come from the character JSON), so the DM can use them.
+
+## Typed combat
+
+Fights are played in words, in individual initiative order (`encounter.mode` is always `"classic"`; the old side-initiative mode and the click-to-act combat endpoints remain only for tests and AI play).
+
+- **Your turn:** when `encounter.my_turn` is true (phase `combat`), the acting player (or the table speaker) sends `POST /games/{gid}/action {text}` — the same endpoint as exploration. Anyone else gets 400 "it's X's turn". The phase becomes `dm` while the DM resolves it.
+- **Your dice:** the DM's attacks and damaging spells open phase `roll` with pending rolls that carry `combat: {op}`. `POST /games/{gid}/roll {roll_id}` runs that step (and any roll-free steps queued after it) and returns `result: {total, natural, rolls, modifier, hit, success, damage, lines: [...], skipped}`. Rolls of one turn must be made in order. With the setting `rolls: "auto"` the game rolls at once.
+- **What players see:** monster tokens have no `hp`/`ac` (`hp_state` healthy/bloodied/dead). Attack log lines against monsters omit "vs AC" and carry `data.ac = null`; a player's attack line has `data.attacker = "pc-<character id>"`, `data.roll`, `data.hit`, `data.damage`, `data.attack` (the frontend shows the dice from it).
+- **DM tools** (act only on the character whose turn it is): `combat_move` (x/y, `toward`, or `away_from` a creature), `combat_attack` (target, weapon), `combat_cast` (spell, target or x/y, slot_level), `combat_feature` (feature, target), `combat_action` (dodge, dash, disengage, hide, help, ready, use_item, other), `combat_end_turn` (runs the monsters' turns up to the next player and reports them). Each turn's DM message includes a text brief: a coordinate grid of the map, every creature's square, distance, HP and AC, and the actor's movement, action economy, weapons, spells, slots and features.
+- **After the DM's reply:** if it resolved something but didn't end the turn, the game ends it and asks the DM to narrate what followed; if it changed nothing (asked the player to clarify), the same player's turn stays open. Timeouts and away players: the AI (or a Dodge) takes the turn and the DM narrates it.
+- `start_combat` takes `terrain` (now including `town`) and `distance` (`close` 10-20 ft, `near` 30-40 ft, `far`); its result reports initiative and any enemy attacks before the first player's turn.

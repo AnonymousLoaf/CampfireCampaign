@@ -64,10 +64,11 @@ function TvLayout({ view }: { view: GameView }) {
   }, [view.characters]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const whoseTurn = (() => {
-    if (p.type === "combat" && enc) {
-      if (enc.mode === "side") return enc.turn.side === "party" ? "The party's turn" : "The monsters act";
+    // During a fight (including rolls and while the DM writes), show whose turn it is in initiative order.
+    if (enc && p.type !== "lobby" && p.type !== "ended") {
+      if (enc.mode === "side" && !enc.turn.actor_id) return enc.turn.side === "party" ? "The party's turn" : "The monsters act";
       const t = enc.tokens.find((x) => x.id === enc.turn.actor_id);
-      return t ? `${t.name}'s turn` : "";
+      return t ? `Round ${enc.round} · ${t.name}'s turn` : `Round ${enc.round}`;
     }
     if (p.waiting_on.length) {
       const names = p.waiting_on

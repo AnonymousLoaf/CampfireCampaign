@@ -40,6 +40,18 @@ Pick per game (and change any time in the ⚙ game settings):
 - **Who acts** (game settings): each player, or **one table speaker** who types and acts for the whole party — shops and combat included.
 - **📺 TV view** gives a private link (no login) for a TV or laptop across the room: map, party stats, story, shop stock and whose turn it is.
 
+## Fights
+
+Combat is played the tabletop way: theatre of the mind, with the battle map as the table.
+
+- Everyone rolls initiative and acts **one at a time, in order** — each move changes the next. (Deciding what to do between fights stays asynchronous for the whole party.)
+- On your turn you **type what your character does** ("I duck behind the cart and throw a dagger at the orc's head"). The DM resolves it by the rules: moves your token, spends your action and bonus action, and asks for your rolls.
+- **You roll your own dice**: an attack or spell becomes a Roll button (one roll covers the attack and, on a hit, its damage). With the game's "rolls: auto" setting the game rolls for you.
+- Clicking a creature only shows what your character could know: allies' HP and AC; enemies as Unhurt or Bloodied, their conditions and how far away they are.
+- Your combat panel is a read-only reference card: movement left, action / bonus action / reaction, weapons, spells and slots, features and their uses.
+- The enemies act on their own turns (the DM rolls behind the screen), and the DM narrates exactly what the dice did.
+- Miss your turn's deadline and the timeout policy applies (the AI plays you cautiously, or you Dodge); players on vacation are played by the AI.
+
 ## Notifications
 
 Each player sets their own in Settings: push on this device, email, and a reminder before their deadline.

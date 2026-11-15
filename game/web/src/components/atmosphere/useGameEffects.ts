@@ -73,9 +73,27 @@ export function useGameEffects(view: GameView, opts: { tv?: boolean } = {}) {
           if (r?.natural === 20) sounds.push("crit");
           break;
         }
-        case "combat":
+        case "combat": {
           sounds.push(...combatEffect(e.text, d));
+          // A player's own attack roll (typed combat: they clicked Roll) gets the dice too.
+          const cd = (d ?? {}) as { attacker?: string; roll?: RollData["roll"]; hit?: boolean; attack?: string; damage?: number };
+          const r = cd.roll;
+          if (cd.attacker?.startsWith("pc-") && r && typeof r.natural === "number" && typeof r.total === "number") {
+            const c = view.characters[cd.attacker.slice(3)];
+            showDice({
+              natural: r.natural,
+              total: r.total,
+              modifier: r.modifier,
+              rolls: r.rolls,
+              dc: null,
+              success: typeof cd.hit === "boolean" ? cd.hit : null,
+              label: cd.attack ? `${cd.attack}${cd.hit && cd.damage ? ` · ${cd.damage} damage` : ""}` : "Attack",
+              who: c?.name,
+              color: c?.color,
+            });
+          }
           break;
+        }
         case "event":
         case "system":
           if (/\b(loot|gold|gp|coins?|treasure|buys?|sells?|sold|bought|purse)\b/i.test(e.text)) sounds.push("coins");

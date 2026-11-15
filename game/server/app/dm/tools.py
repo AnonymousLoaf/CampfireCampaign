@@ -4,8 +4,9 @@ from __future__ import annotations
 import random
 import uuid
 
-from ..game import combat
+from ..game import combat, turns
 from ..game.state import Ctx
+from ..rules.rulesets import R
 from ..rules import character as ch
 from ..rules import dice, srd
 from ..rules import shop as shop_rules
@@ -43,6 +44,49 @@ TOOLS: list[dict] = [
     {"name": "end_combat",
      "description": "End the current fight without a victory (the enemies flee or surrender, or the party escapes).",
      "input_schema": {"type": "object", "properties": {"reason": {"type": "string"}}, "required": ["reason"]}},
+    # Typed combat: these act only on the player character whose turn it is, in the order you call them.
+    {"name": "combat_move",
+     "description": "Move the character whose turn it is. Give a square (x, y), or `toward` a creature (stops within "
+                    "stop_within_ft, default 5 = adjacent), or `away_from` a creature (as far as their movement allows). "
+                    "Uses their remaining movement; difficult terrain costs double; leaving an enemy's reach provokes an "
+                    "opportunity attack unless they Disengaged. Fails if the square is out of reach.",
+     "input_schema": {"type": "object", "properties": {
+         "x": {"type": "integer"}, "y": {"type": "integer"},
+         "toward": {"type": "string", "description": "creature name"},
+         "away_from": {"type": "string", "description": "creature name"},
+         "stop_within_ft": {"type": "integer", "minimum": 5, "maximum": 120}}}},
+    {"name": "combat_attack",
+     "description": "One weapon attack by the character whose turn it is (call it once per attack; Extra Attack allows "
+                    "more). The player rolls the attack (and damage on a hit) unless the game auto-rolls; until then the "
+                    "result is unknown, so end your narration by asking for the roll. Fails if out of range or no "
+                    "attacks are left.",
+     "input_schema": {"type": "object", "properties": {
+         "target": {"type": "string"}, "weapon": {"type": "string", "description": "attack id or name from the brief"}},
+         "required": ["target", "weapon"]}},
+    {"name": "combat_cast",
+     "description": "Cast one of the acting character's spells that the game resolves (see the brief). Give `target` "
+                    "for a creature, or x/y for an area's point. Spell attacks and damage are rolled by the player.",
+     "input_schema": {"type": "object", "properties": {
+         "spell": {"type": "string"}, "target": {"type": "string"}, "x": {"type": "integer"}, "y": {"type": "integer"},
+         "slot_level": {"type": "integer", "minimum": 1, "maximum": 9}}, "required": ["spell"]}},
+    {"name": "combat_feature",
+     "description": "Use one of the acting character's combat features (Second Wind, Action Surge, Rage, Flurry of "
+                    "Blows, Cunning Action, Lay on Hands, Bardic Inspiration…) by id or name, with a target if it needs one.",
+     "input_schema": {"type": "object", "properties": {
+         "feature": {"type": "string"}, "target": {"type": "string"}, "x": {"type": "integer"}, "y": {"type": "integer"}},
+         "required": ["feature"]}},
+    {"name": "combat_action",
+     "description": "A standard action by the acting character: dodge, dash, disengage, or (spending the action, resolved "
+                    "by you with roll_check/apply_damage/add_condition) hide, help, ready, use_item, other.",
+     "input_schema": {"type": "object", "properties": {
+         "action": {"type": "string", "enum": ["dodge", "dash", "disengage", "hide", "help", "ready", "use_item", "other"]},
+         "note": {"type": "string", "description": "what exactly they do, for hide/help/ready/use_item/other"}},
+         "required": ["action"]}},
+    {"name": "combat_end_turn",
+     "description": "End the acting character's turn once everything they did is resolved (call it after the player's "
+                    "rolls came back, not while rolls are pending). The enemies then take their turns; the result tells "
+                    "you what they did and whose turn is next, so narrate it all and end by turning to that character.",
+     "input_schema": {"type": "object", "properties": {}}},
     {"name": "apply_damage",
      "description": "Deal damage to a player character or a monster on the battle map (traps, falls, environmental harm).",
      "input_schema": {"type": "object", "properties": {
@@ -142,6 +186,8 @@ class ToolBox:
         self.opened_shop = False
         self.pending_rolls: list[dict] = []
         self.calls: list[str] = []
+        self.ended_turn = False
+        self.combat_steps = 0
 
     # ── dispatch ──
     def call(self, name: str, args: dict) -> str:
@@ -217,7 +263,8 @@ class ToolBox:
         party = self.ctx.living_party()
         if not party:
             raise RulesError("no living party members")
-        enc, lines = combat.start(specs, terrain, party, self.ctx.settings.get("combat_mode", "side"),
+        # Typed combat is always individual initiative: one character at a time, each move affects the next.
+        enc, lines = combat.start(specs, terrain, party, "classic",
                                   self.ctx.settings.get("death_rule", "standard"), seed=random.randrange(1 << 30),
                                   ruleset=ruleset, distance=distance if distance in bm.DISTANCES else "far")
         self.ctx.state["encounter"] = enc
@@ -239,14 +286,133 @@ class ToolBox:
         mons = [t for t in enc["tokens"].values() if t["kind"] == "monster"]
         gap = min((bm.distance_ft((p["x"], p["y"]), (m["x"], m["y"])) for p in pcs for m in mons), default=0)
         happened = [ln["text"] for ln in lines[1:]]
-        party_turn = enc["turn"].get("side") == "party" or (
-            enc["turn"].get("actor_id") and enc["tokens"].get(enc["turn"]["actor_id"], {}).get("kind") == "pc")
+        enc.pop("round_complete", None)
+        nxt = enc["tokens"].get(enc["turn"].get("actor_id") or "", {})
+        turn = (f"It is now {nxt['name']}'s turn (round {enc['round']}). End your narration by turning to {nxt['name']} "
+                f"and asking what they do." if nxt.get("kind") == "pc" else "")
         return (f"Combat started on a {enc['terrain']} map; the nearest enemy is {gap} ft from the party. "
                 f"Foes: {'; '.join(foes)}.\nWhat has happened so far, exactly as resolved by the game:\n- "
                 + "\n- ".join(happened)
-                + f"\nIt is now {'the party' if party_turn else 'the enemies'}' turn (round {enc['round']}). Narrate the "
-                  f"fight's opening to match these results exactly (same weapons, hits, misses and damage), then stop; "
-                  f"the players act on the battle map.")
+                + f"\nNarrate the fight's opening to match these results exactly (same weapons, hits, misses and damage). "
+                  f"{turn} Don't resolve any player's action yet: each player types their own turn.")
+
+    # ── typed combat ──
+    def _turn(self) -> tuple[dict, dict, dict]:
+        enc = self.ctx.encounter
+        if not enc:
+            raise RulesError("no fight is in progress")
+        t = turns.actor(enc, self.ctx.chars)
+        if not t:
+            raise RulesError("it isn't a player character's turn right now")
+        return enc, t, self.ctx.chars[t["character_id"]]
+
+    def _step(self, op: dict, roll_label: str | None = None, bonus: int = 0) -> str:
+        """Run a step of the acting character's turn now, or queue it behind a player roll."""
+        enc, t, s = self._turn()
+        self.combat_steps += 1
+        q = enc.setdefault("queue", [])
+        if roll_label and self.ctx.settings.get("rolls") != "auto":
+            turns.validate(enc, self.ctx.chars, op)
+            rid = uuid.uuid4().hex[:8]
+            op["roll_id"] = rid
+            q.append(op)
+            m = self.ctx.member_for_char(t["character_id"])
+            self.pending_rolls.append({"id": rid, "user_id": m.user_id if m else None, "character_id": t["character_id"],
+                                       "label": roll_label, "check": "combat", "bonus": bonus, "dc": None,
+                                       "advantage": "normal", "result": None, "combat": {"op": op["kind"]}})
+            return (f"Roll requested: {roll_label}. The outcome is unknown until the player rolls — narrate the build-up, "
+                    f"end by asking for the roll, and don't end the turn yet. One Roll covers the attack and, on a hit, "
+                    f"its damage: don't ask for a separate damage roll.")
+        if q:
+            turns.validate(enc, self.ctx.chars, op)
+            q.append(op)
+            return "Queued: it happens right after the pending roll(s), in order."
+        lines = turns.run_op(enc, self.ctx.chars, op)
+        self.ctx.log_lines(lines)
+        return "Resolved: " + (" ".join(ln["text"] for ln in lines) or "done.")
+
+    def t_combat_move(self, x: int | None = None, y: int | None = None, toward: str | None = None,
+                      away_from: str | None = None, stop_within_ft: int = 5) -> str:
+        enc, t, _ = self._turn()
+        op: dict = {"kind": "move", "tid": t["id"]}
+        if toward:
+            op.update(toward=turns.find_token(enc, self.ctx.chars, toward)["id"], stop=max(5, int(stop_within_ft or 5)))
+        elif away_from:
+            op["away_from"] = turns.find_token(enc, self.ctx.chars, away_from)["id"]
+        elif x is not None and y is not None:
+            op.update(x=int(x), y=int(y))
+        else:
+            raise RulesError("give x and y, or toward/away_from a creature")
+        return self._step(op)
+
+    def t_combat_attack(self, target: str, weapon: str) -> str:
+        enc, t, s = self._turn()
+        tgt = turns.find_token(enc, self.ctx.chars, target, kind="monster")
+        a = turns.find_attack(s, weapon)
+        op = {"kind": "attack", "tid": t["id"], "attack_id": a["id"], "target_id": tgt["id"]}
+        return self._step(op, f"{s['name']}: attack roll — {a['name']} vs {tgt['name']} (d20{a['to_hit']:+d})", a["to_hit"])
+
+    def t_combat_cast(self, spell: str, target: str | None = None, x: int | None = None, y: int | None = None,
+                      slot_level: int | None = None) -> str:
+        enc, t, s = self._turn()
+        idx = turns.find_spell(s, spell)
+        if idx not in combat.FX(s):
+            raise RulesError(f"the game doesn't resolve {spell} automatically — resolve it yourself with roll_check, "
+                             f"apply_damage, heal or add_condition, and use combat_action 'other' for the action")
+        tgt = turns.find_token(enc, self.ctx.chars, target) if target else None
+        op = {"kind": "cast", "tid": t["id"], "spell": idx, "target_id": tgt["id"] if tgt else None,
+              "slot_level": slot_level, "x": x, "y": y}
+        rules = R(s)
+        name = srd.spells(ch.rs(s)).get(idx, {}).get("name", idx)
+        kind = rules.spell_kind(idx)
+        needs_dice = kind in ("attack", "save", "heal")
+        sab = ch.spell_attack(s) or 0
+        label = (f"{s['name']}: spell attack — {name}" + (f" vs {tgt['name']}" if tgt else "") + (f" (d20{sab:+d})" if sab else "")
+                 if kind == "attack" else f"{s['name']}: roll for {name}")
+        return self._step(op, label if needs_dice else None, sab if kind == "attack" else 0)
+
+    def t_combat_feature(self, feature: str, target: str | None = None, x: int | None = None, y: int | None = None) -> str:
+        enc, t, s = self._turn()
+        f = turns.find_feature(s, feature)
+        tgt = turns.find_token(enc, self.ctx.chars, target) if target else None
+        op = {"kind": "feature", "tid": t["id"], "feature": f["id"], "target_id": tgt["id"] if tgt else None, "x": x, "y": y}
+        rolls = f.get("target") == "enemy"
+        return self._step(op, f"{s['name']}: {f['name']}" + (f" vs {tgt['name']}" if tgt else "") if rolls else None)
+
+    def t_combat_action(self, action: str, note: str | None = None) -> str:
+        enc, t, _ = self._turn()
+        if action not in turns.ACTS:
+            raise RulesError(f"action must be one of {', '.join(sorted(turns.ACTS))}")
+        return self._step({"kind": "act", "tid": t["id"], "act": action, "note": (note or "")[:300]})
+
+    def t_combat_end_turn(self) -> str:
+        enc = self.ctx.encounter
+        if not enc:
+            raise RulesError("no fight is in progress")
+        if enc.get("queue"):
+            raise RulesError("the player still has rolls to make — end the turn after you've narrated their results")
+        tid = (enc.get("turn") or {}).get("actor_id")
+        t = enc["tokens"].get(tid or "")
+        if not t or t["kind"] != "pc":
+            raise RulesError("it isn't a player character's turn")
+        if combat.can_act(enc, tid, self.ctx.chars):
+            lines = combat.end_turn(enc, self.ctx.chars, tid)
+        else:  # they went down mid-turn
+            lines = combat.advance(enc, self.ctx.chars)
+        enc.pop("round_complete", None)
+        enc.pop("declared", None)
+        self.ctx.log_lines(lines)
+        self.ended_turn = True
+        happened = "\n".join(f"- {ln['text']}" for ln in lines) or "- (nothing else happened)"
+        outcome = combat.check_end(enc, self.ctx.chars)
+        if outcome:
+            return (f"{t['name']}'s turn is over. Then:\n{happened}\nThe fight is over ({outcome}). Narrate how it ends; "
+                    f"the game hands out XP and loot right after.")
+        nxt = turns.actor(enc, self.ctx.chars) or enc["tokens"].get(enc["turn"].get("actor_id") or "", {})
+        name = nxt.get("name", "the next character")
+        return (f"{t['name']}'s turn is over. What happened next, exactly as resolved by the game:\n{happened}\n"
+                f"Now it is {name}'s turn (round {enc['round']}). Narrate these results (same weapons, hits, misses "
+                f"and damage) and end by turning to {name}: what do they do?")
 
     def t_end_combat(self, reason: str) -> str:
         if not self.ctx.encounter:
@@ -262,8 +428,9 @@ class ToolBox:
             res = ch.take_damage(obj, amount)
             self.ctx.log("event", f"{obj['name']} takes {res['damage']} {damage_type} damage.".replace("  ", " "))
             return f"{obj['name']} now has {obj['hp']}/{obj['hp_max']} HP" + (" and is down." if res["down"] else ".")
-        dealt, note = combat.apply_damage(self.ctx.encounter, self.ctx.chars, obj, amount, damage_type)
+        dealt, note, extra = combat.apply_damage(self.ctx.encounter, self.ctx.chars, obj, amount, damage_type)
         self.ctx.log("combat", f"{obj['name']} takes {dealt} {damage_type} damage.".replace("  ", " "))
+        self.ctx.log_lines(extra)
         return f"{obj['name']} takes {dealt}. {note}".strip()
 
     def t_heal(self, target: str, amount: int) -> str:
@@ -475,6 +642,8 @@ def _check_bonus(s: dict, check: str) -> tuple[str, int]:
 
 
 def roll_pending(ctx: Ctx, roll: dict) -> dict:
+    if roll.get("combat"):
+        return _roll_combat(ctx, roll)
     s = ctx.chars.get(roll["character_id"])
     bonus = roll.get("bonus", 0)
     r = dice.d20(bonus, roll.get("advantage", "normal"))
@@ -484,6 +653,29 @@ def roll_pending(ctx: Ctx, roll: dict) -> dict:
         s["inspiration"] = True
     ctx.log("roll", f"{roll['label']}: {r['total']}" + (f" vs DC {roll['dc']} — {'success' if ok else 'failure'}" if roll.get("dc") else "") + ".",
             None, {"roll": r, "dc": roll.get("dc"), "character_id": roll["character_id"]})
+    return roll
+
+
+def _roll_combat(ctx: Ctx, roll: dict) -> dict:
+    """A player rolls for a queued step of their combat turn: run the turn's steps up to this one (and any roll-free
+    steps after it) with the real engine, and record what the dice did."""
+    enc = ctx.encounter
+    if not enc:
+        roll["result"] = {"total": 0, "natural": 0, "modifier": 0, "success": None, "lines": ["The fight is already over."],
+                          "skipped": True}
+        return roll
+    earlier = [r for r in ctx.phase.get("pending_rolls", []) if r.get("combat") and r.get("result") is None]
+    if earlier and earlier[0]["id"] != roll["id"]:
+        raise RulesError("make the earlier roll first — this turn's steps happen in order")
+    mine, everything = turns.execute_through(enc, ctx.chars, roll["id"])
+    ctx.log_lines(everything)
+    first = next((ln for ln in mine if (ln.get("data") or {}).get("roll")), None)
+    d = (first or {}).get("data") or {}
+    r = d.get("roll") or {}
+    roll["result"] = {"total": r.get("total", 0), "natural": r.get("natural", 0), "rolls": r.get("rolls", []),
+                      "modifier": roll.get("bonus", 0), "success": d.get("hit"), "hit": d.get("hit"),
+                      "damage": d.get("damage"),
+                      "lines": [ln["text"] for ln in mine] or ["Nothing happened."], "skipped": not mine}
     return roll
 
 
