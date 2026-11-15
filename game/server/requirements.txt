@@ -1,0 +1,9 @@
+fastapi==0.163.0
+uvicorn[standard]==0.54.0
+SQLAlchemy==2.1.8
+pydantic==2.14.3
+anthropic==2.8.0
+claude-agent-sdk==0.2.182
+httpx==0.28.1
+cryptography==50.0.2
+pytest==9.2.0

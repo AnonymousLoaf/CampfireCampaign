@@ -1,0 +1,239 @@
+/* Auth */
+.auth-screen {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  background: radial-gradient(ellipse at 50% 20%, rgba(216, 169, 74, 0.12), transparent 60%);
+}
+.auth-card {
+  width: min(400px, 100%);
+  background: var(--panel);
+  border: 1px solid var(--border-2);
+  border-radius: 12px;
+  padding: 26px 24px;
+  box-shadow: var(--shadow);
+}
+.brand {
+  text-align: center;
+  margin-bottom: 18px;
+}
+.brand h1 {
+  font-size: 1.8rem;
+  color: var(--gold-2);
+  margin: 4px 0;
+}
+.brand .brand-sigil {
+  font-size: 2rem;
+}
+
+/* Lobby */
+.lobby {
+  min-height: 100%;
+}
+.lobby-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 16px;
+  padding: 16px 20px 32px;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+.lobby-grid .settings-panel {
+  grid-column: 1 / -1;
+  max-width: 640px;
+}
+@media (max-width: 900px) {
+  .lobby-grid {
+    grid-template-columns: 1fr;
+    padding: 12px;
+  }
+}
+.game-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.game-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-2);
+  cursor: pointer;
+  transition: border-color 0.12s;
+}
+.game-row:hover {
+  border-color: var(--gold);
+}
+.game-row.my-turn {
+  border-color: var(--gold);
+  box-shadow: inset 3px 0 0 var(--gold);
+}
+.game-name {
+  font-family: var(--font-title);
+  font-size: 1.02rem;
+}
+.game-row-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex: none;
+}
+.status-pill {
+  font-size: 0.75rem;
+  padding: 0.1em 0.6em;
+  border-radius: 999px;
+  border: 1px solid var(--border-2);
+  color: var(--text-dim);
+}
+.status-pill.active {
+  border-color: var(--green);
+  color: #9fd8aa;
+}
+.status-pill.lobby {
+  border-color: var(--blue);
+  color: #a9cdea;
+}
+.countdown {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+}
+.countdown.overdue {
+  color: var(--red-2);
+}
+
+.char-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+}
+.char-card {
+  display: flex;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-2);
+  align-items: flex-start;
+}
+.char-card-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.char-name {
+  font-family: var(--font-title);
+  font-size: 1rem;
+}
+.char-stats {
+  display: flex;
+  gap: 10px;
+  color: var(--text-dim);
+}
+.key-chip {
+  font-family: ui-monospace, Consolas, monospace;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  border-radius: 6px;
+  padding: 0.2em 0.6em;
+}
+.settings-panel form {
+  margin-top: 10px;
+}
+
+/* Picker */
+.picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow: auto;
+}
+.picker-item {
+  font: inherit;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  text-align: left;
+  border-radius: 6px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  cursor: pointer;
+}
+.picker-item.selected {
+  border-color: var(--gold);
+  background: rgba(216, 169, 74, 0.12);
+}
+
+/* Create game */
+.create-game {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.create-game fieldset {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px 12px;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.create-game legend {
+  font-family: var(--font-title);
+  color: var(--gold-2);
+  padding: 0 6px;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.engine-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 8px;
+}
+.engine {
+  font: inherit;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-2);
+  border-radius: 8px;
+  background: var(--bg-2);
+  color: var(--text);
+  cursor: pointer;
+}
+.engine.selected {
+  border-color: var(--gold);
+  background: rgba(216, 169, 74, 0.12);
+}
+.engine:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.issue-list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+.issue-list li {
+  margin-bottom: 6px;
+}

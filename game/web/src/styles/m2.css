@@ -1,0 +1,200 @@
+/* M2 additions: level-up, spell preparation, class features, aiming, rests, haggling. */
+
+.levelup-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--gold-2);
+  background: linear-gradient(180deg, #f0c66b, #c6902e);
+  color: #2b1d08;
+  font-weight: 700;
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  cursor: pointer;
+  box-shadow: 0 0 0 0 rgba(240, 198, 107, 0.6);
+  animation: levelup-pulse 1.8s ease-out infinite;
+}
+.levelup-badge:hover {
+  filter: brightness(1.08);
+}
+@keyframes levelup-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(240, 198, 107, 0.6);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(240, 198, 107, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(240, 198, 107, 0);
+  }
+}
+
+.levelup-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  border: 1px solid var(--gold);
+  border-radius: var(--radius);
+  background: rgba(216, 169, 74, 0.12);
+  color: var(--gold-2);
+  font-weight: 600;
+}
+
+.levelup section {
+  margin-bottom: 18px;
+}
+.levelup h3 {
+  margin: 0 0 8px;
+}
+.levelup-done {
+  text-align: center;
+  padding: 12px 0;
+}
+.levelup-done .big-num {
+  font-family: var(--font-title);
+  font-size: 2rem;
+  color: var(--gold-2);
+}
+
+.badge.tiny {
+  font-size: 0.65rem;
+  padding: 0 5px;
+  margin-left: 3px;
+  vertical-align: middle;
+}
+.badge.rarity-uncommon {
+  border-color: #3f8f4f;
+  color: #8fdc9c;
+}
+.badge.rarity-rare {
+  border-color: #3a6fb0;
+  color: #9cc4f5;
+}
+.badge.rarity-very-rare {
+  border-color: #7b48b8;
+  color: #cba6f5;
+}
+.badge.rarity-legendary {
+  border-color: #c07a1e;
+  color: #f5c77a;
+}
+.badge.rarity-common {
+  color: var(--text-dim);
+}
+
+.cond.conc {
+  border-color: #3b6c94;
+  color: #9fd0ff;
+  background: rgba(79, 143, 192, 0.12);
+}
+.conc-line {
+  margin: 6px 0;
+  color: #9fd0ff;
+}
+
+.slot-group.pact .pip.full {
+  background: #9b6be0;
+  border-color: #c9a8ff;
+}
+.tiny-text {
+  font-size: 0.65rem;
+}
+
+.row-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.prepare-editor {
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius);
+  padding: 8px;
+  background: var(--panel-2);
+}
+.prepare-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 260px;
+  overflow-y: auto;
+  margin-bottom: 8px;
+}
+.prepare-item {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.prepare-item.on {
+  background: rgba(216, 169, 74, 0.12);
+}
+.prepare-item input {
+  margin-top: 3px;
+}
+
+/* Class features in the combat composer */
+.feature-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0;
+}
+.feature-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.feature-group-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  min-width: 62px;
+}
+.feature-btn.armed,
+.btn.action.armed {
+  outline: 2px solid #ffb15a;
+  outline-offset: 1px;
+}
+
+.aim-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  margin: 6px 0;
+  border: 1px solid #c97a2e;
+  border-radius: var(--radius);
+  background: rgba(255, 140, 50, 0.12);
+  font-size: 0.85rem;
+}
+
+/* Rests */
+.chip-sep {
+  width: 1px;
+  align-self: stretch;
+  background: var(--border-2);
+  margin: 0 2px;
+}
+.chip.rest.selected {
+  border-color: #6f8fd8;
+  background: rgba(111, 143, 216, 0.2);
+  color: #dfe8ff;
+}
+
+/* Shops */
+.shop-item.service {
+  border-left: 3px solid var(--blue);
+}
+.price s {
+  margin-right: 4px;
+}
