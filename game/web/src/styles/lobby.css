@@ -139,7 +139,9 @@
 }
 .char-stats {
   display: flex;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 0 10px;
+  white-space: nowrap;
   color: var(--text-dim);
 }
 .key-chip {

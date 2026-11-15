@@ -23,7 +23,7 @@ LENGTH = {"one_shot": "a one-shot: resolve the main story in roughly 3-5 session
 NARRATION = {"short": "60-120 words", "medium": "120-220 words", "long": "200-350 words"}
 
 STANDARDS = """\
-You are the Dungeon Master for an online, asynchronous D&D 5e game (SRD 5.1 rules, levels 1-5). Several real players
+You are the Dungeon Master for an online, asynchronous D&D 5e game ({RULES}, character levels 1-10). Several real players
 share one party. They submit actions on their own time; each of your turns resolves one round of play for the whole
 party, then the game waits for their next moves. Sometimes they play live around one screen — same rules, faster pace.
 
@@ -38,7 +38,7 @@ How the game works:
 - Shops are browsed by the players on a shop screen (open_shop). Don't haggle prices in prose.
 - Travel happens on the world map. When the party heads somewhere named, call travel. Rests the players vote for
   are resolved by the game before you narrate; call rest yourself only when the story grants one.
-- XP and loot from fights are handled by the game. Players confirm their own level-ups on their sheets (levels 1-5);
+- XP and loot from fights are handled by the game. Players confirm their own level-ups on their sheets (levels 1-10);
   award_xp for non-combat achievements.
 - Shop types: general, blacksmith, alchemist, magic (only in cities or where the story allows), temple (healing
   services), inn (rooms, gossip). Battle maps: road, forest, tavern, cave, dungeon, ruins, camp, swamp.
@@ -68,9 +68,18 @@ so players know what they can do next. Write the narration as your final message
 """
 
 
+RULES_TEXT = {
+    "2014": "the 2014 rules (SRD 5.1)",
+    "2024": "the 2024 rules, sometimes called 5.5 (SRD 5.2): species instead of races, backgrounds that grant ability "
+            "increases and an origin feat, weapon masteries, Heroic Inspiration, 2024 spell and monster versions, and "
+            "2024 exhaustion (−2 to d20 tests per level)",
+}
+
+
 def system_prompt(ctx: Ctx) -> str:
     st = ctx.settings
-    lines = [STANDARDS, "", "This game's settings:"]
+    lines = [STANDARDS.replace("{RULES}", RULES_TEXT.get(st.get("ruleset", "2014"), RULES_TEXT["2014"])), "",
+             "This game's settings:"]
     lines.append(f"- Story: {STORY.get(st['story_type'], st['story_type'])}.")
     lines.append(f"- Tone: {st['tone']}. Length: {LENGTH.get(st['length'], st['length'])}.")
     lines.append(f"- Difficulty: {st['difficulty']} (encounters and danger should match). Death: {st['death_rule']}"
@@ -109,6 +118,15 @@ def _char_line(ctx: Ctx, cid: str, s: dict) -> str:
         slots = ", ".join(f"L{k} {x['max'] - x['used']}/{x['max']}" for k, x in sc["slots"].items())
         parts.append(f"  Spells (DC {sc['save_dc']}, +{sc['attack_bonus']}): cantrips {', '.join(c['name'] for c in sc['cantrips'])}; "
                      f"prepared {', '.join(c['name'] for c in sc['spells'])}; slots {slots}.")
+    if v.get("subclass"):
+        parts.append(f"  Subclass: {v['subclass']}. Features: " + ", ".join(f["name"] for f in v["features"][:20]) + ".")
+    if v.get("feats"):
+        parts.append("  Feats: " + ", ".join(f["name"] for f in v["feats"]) + ".")
+    if v.get("masteries"):
+        parts.append("  Weapon masteries: " + ", ".join(f"{m['name']} ({m['mastery']})" for m in v["masteries"]) + ".")
+    for c in (s.get("custom") or [])[:12]:  # homebrew / content from books the player owns — adjudicate from the text
+        desc = c.get("description", "")
+        parts.append(f"  Custom {c.get('kind', 'feature')} — {c['name']}: {desc[:400]}{'…' if len(desc) > 400 else ''}")
     if s.get("backstory"):
         parts.append(f"  Backstory: {s['backstory'][:300]}")
     return "\n".join(parts)

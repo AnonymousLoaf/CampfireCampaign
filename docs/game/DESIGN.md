@@ -283,8 +283,8 @@ All 12 SRD classes and races to level 5, player-confirmed level-ups, spell prepa
 ### M3 — Async polish ✅ built
 Email and web-push notifications with deadline reminders, vacation mode, phone layout, story history with catch-up recaps, spectators, edited-action markers — plus the 2024 rules (SRD 5.2) and levels 6-10 for both rulesets.
 
-### M4 — Atmosphere
-Scene backgrounds and sky canvas from the display companion, sound effects, spoken narration (reuse `tts.py`), dice animations, character portraits.
+### M4 — Atmosphere ✅ built
+Scene backgrounds and an animated sky, synthesized ambience and sound effects, spoken narration (browser voices), dice animations, uploaded or generated portraits — plus a private custom content library (homebrew / owned books) and the D&D Beyond 2024 import fixes.
 
 ### M5 — Going public
 Hosted server (Postgres, cloud), Google/Discord login, bring-your-own-key and/or billing, open lobbies to play with strangers, moderation and reporting, rate limits, content audit (SRD only), published source (AGPL), terms of service and privacy policy.

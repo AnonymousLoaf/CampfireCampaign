@@ -368,3 +368,49 @@ The server notifies a player (push and/or email, per their settings) when: a pha
 - `GameView.me` gains `last_seen_id: n|null` and `unseen_count: n`; `POST /games/{id}/seen {log_id}` records how far I've read.
 - `POST /games/{id}/recap` → `{text}`: the DM summarises what happened since my `last_seen_id` in a few sentences (uses the game's DM engine; the offline DM returns a bullet list). Not added to the log.
 - Submissions gain `edited: bool` and `updated_at`; `submissions_visible[]` include them.
+
+---
+
+# M4 additions
+
+## Atmosphere (frontend; driven by existing fields)
+
+- **Scene backgrounds + sky:** `GameView.scene` = `{type, time_of_day, weather, day, hour}` drives a scene-reactive background behind the story and an animated sky strip (sun/moon arc by `hour`, stars at night, clouds/rain/snow/fog by `weather`). `scene.type` is one of town, tavern, wilderness, forest, dungeon, cave, ruins, road, castle, temple, swamp, mountain, coast. New: when the battle map is up, the background follows `encounter.terrain`.
+- **Sound:** synthesized in the browser (Web Audio, no audio files): ambience per scene (wind, rain, fire crackle, tavern murmur, cave drips, water) and effects keyed off new log entries — `combat` lines with `data.hit` (sword/arrow/magic by the attack name or damage type), `data.crit`, `heal`, a death (`falls`), `roll` entries (dice rattle), loot/coin events, doors. Per-device volume and mute in Settings (localStorage).
+- **Spoken narration:** browser speech synthesis (free, no key): a speaker button on each narration and an "auto-read new narration" toggle (per device; on by default in the TV view when switched on there). Voice/rate picker in Settings.
+- **Dice:** an animated dice roll (d20 tumbling, landing on the natural roll, crit/fumble flourishes) whenever a `roll` log entry or a pending-roll result arrives — in the feed, on the TV and when I press Roll.
+
+## Portraits
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| POST | `/characters/{id}/portrait` | multipart file `image` (PNG/JPEG/WebP, ≤ 3 MB; the server re-encodes to 256×256 WebP) | `CharacterView` |
+| DELETE | `/characters/{id}/portrait` | – | `CharacterView` |
+| GET | `/files/portraits/{file}` | – | the image (public URL, unguessable name) |
+
+`CharacterView.portrait_url: str|null`. Without one, the frontend draws a generated crest (class emblem + colour + initials). Portraits show in the party panel, sheet, battle-map tokens (clipped to the circle), TV cards and character cards. Allowed while in a game.
+
+## Custom content library (homebrew and content from books you own)
+
+Per user, private. Lets players add backgrounds, feats, subclass features, species traits, spells and items from their own books or homebrew; the DM reads them. Never shared outside the user's own games.
+
+`CustomEntry = {id, kind: "feat"|"feature"|"spell"|"item"|"background"|"species_trait", name, description, level: n|null, data: {}, created_at}`
+- spell `data`: `{level, school, casting_time, range, concentration}` (adjudicated by the DM; castable as a custom action)
+- item `data`: `{value_gp, weight, category}`
+- background `data`: `{skills: [skill], tool}`
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| GET | `/custom` | – | `[CustomEntry]` (mine) |
+| POST | `/custom` | `{kind, name, description, level?, data?}` | `CustomEntry` |
+| PUT | `/custom/{id}` | same | `CustomEntry` |
+| DELETE | `/custom/{id}` | – | ok |
+| POST | `/characters/{id}/custom` | `{entry_id}` — attach to my character (items go into the inventory; others become features/feats/spells on the sheet) | `CharacterView` |
+| DELETE | `/characters/{id}/custom/{entry_id}` | – | `CharacterView` |
+
+`CharacterView` gains `custom: [{entry_id, kind, name, description, level}]` (also shown in Features/Feats/Spells with a "custom" tag). The DM's context includes every attached custom entry's description.
+
+## D&D Beyond import (fixed)
+
+- 2024 characters are detected (non-legacy species/background) and import as `ruleset: "2024"`; others as 2014. The import result gains `ruleset`.
+- Features, feats, species traits and subclass features from the D&D Beyond sheet that the game's tables don't cover are kept as custom entries attached to the character (their descriptions come from the character JSON), so the DM can use them.

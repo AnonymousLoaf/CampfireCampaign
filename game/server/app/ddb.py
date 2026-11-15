@@ -1,16 +1,25 @@
-"""D&D Beyond import: reuse skills/dnd/scripts/ddb_import.py to read the character JSON, then map it to a sheet."""
+"""D&D Beyond import: reuse skills/dnd/scripts/ddb_import.py to read the character JSON, then map it to a sheet.
+
+2024 ("5.5") characters are detected from D&D Beyond's legacy flags and import with the 2024 rules.
+Features the game's own (SRD) tables don't cover — subclass features, feats, species traits from books
+the player owns — are kept as custom entries on the character with their D&D Beyond descriptions,
+so the DM can use them.
+"""
 from __future__ import annotations
 
+import html
 import importlib.util
 import json
 import re
+import uuid
 from functools import lru_cache
 
 from .config import SKILL_SCRIPTS
 from .rules import character as ch
 from .rules import srd
 from .rules.character import RulesError
-from .rules.classes import BACKGROUNDS, CLASSES, MAX_LEVEL, SKILLS, XP_THRESHOLDS
+from .rules.classes import SKILLS
+from .rules.rulesets import SRD_SUBCLASS_FEATURES, R
 
 
 @lru_cache(maxsize=1)
@@ -45,37 +54,105 @@ def _slug(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", (s or "").lower()).strip("-")
 
 
+def _text(raw: str | None) -> str:
+    """D&D Beyond descriptions are HTML: turn them into plain text."""
+    t = re.sub(r"<\s*br\s*/?>|</p>|</li>", "\n", raw or "", flags=re.I)
+    t = re.sub(r"<[^>]+>", "", t)
+    t = html.unescape(t)
+    return re.sub(r"\n{3,}", "\n\n", t).strip()
+
+
+def detect_ruleset(d: dict) -> str:
+    """2024 if the species or background is a current (non-legacy) 2024 option."""
+    race = d.get("race") or {}
+    bg = ((d.get("background") or {}).get("definition")) or {}
+    if race.get("isLegacy") is False or bg.get("isLegacy") is False:
+        return "2024"
+    return "2014"
+
+
+def _ddb_features(d: dict, main_class: dict | None) -> list[dict]:
+    """Every named feature on the D&D Beyond sheet: class/subclass features, feats, species traits, background feature."""
+    out: list[dict] = []
+    level = sum((c.get("level") or 0) for c in d.get("classes") or [])
+    for c in d.get("classes") or []:
+        for f in c.get("classFeatures") or []:
+            df = f.get("definition") or {}
+            req = df.get("requiredLevel") or 0
+            if df.get("name") and req <= (c.get("level") or level):
+                out.append({"kind": "feature", "name": df["name"], "description": _text(df.get("description")),
+                            "level": req or None})
+    for f in d.get("feats") or []:
+        df = f.get("definition") or {}
+        if df.get("name"):
+            out.append({"kind": "feat", "name": df["name"], "description": _text(df.get("description")), "level": None})
+    for t in (d.get("race") or {}).get("racialTraits") or []:
+        df = t.get("definition") or {}
+        if df.get("name") and not df.get("hideInSheet"):
+            out.append({"kind": "species_trait", "name": df["name"], "description": _text(df.get("description")),
+                        "level": None})
+    bgd = ((d.get("background") or {}).get("definition")) or {}
+    if bgd.get("featureName"):
+        out.append({"kind": "feature", "name": bgd["featureName"], "description": _text(bgd.get("featureDescription")),
+                    "level": None})
+    seen, uniq = set(), []
+    for f in out:
+        k = f["name"].lower()
+        if k not in seen and f["description"]:
+            seen.add(k)
+            uniq.append(f)
+    return uniq
+
+
 def to_sheet(d: dict) -> dict:
     m = _mod()
-    rep = m.check(d, "2014")
+    ruleset = detect_ruleset(d)
+    rules = R(ruleset)
+    rep = m.check(d, ruleset)
     classes = rep["classes"]
     if not classes:
         raise RulesError("the D&D Beyond character has no class yet — finish it in the builder")
     main = max(classes, key=lambda c: c["level"])
     cls_key = (main["name"] or "").lower()
-    if cls_key not in CLASSES:
-        raise RulesError(f"{main['name']} isn't an SRD class this game supports")
+    if cls_key not in rules.CLASSES:
+        raise RulesError(f"{main['name']} isn't a class this game supports")
+    cls = rules.CLASSES[cls_key]
     issues = list(rep["issues"])
     level = rep["level"] or 1
-    if level > MAX_LEVEL:
-        issues.append({"issue": f"level {level} is capped at {MAX_LEVEL} in this version", "fix": "play at level 3 for now"})
+    if level > rules.MAX_LEVEL:
+        issues.append({"issue": f"level {level} is capped at {rules.MAX_LEVEL} for now", "fix": f"play at level {rules.MAX_LEVEL}"})
     if len(classes) > 1:
         issues.append({"issue": "multiclassing isn't supported yet; imported as " + main["name"], "fix": "—"})
     scores = rep["abilities"] or {a: 10 for a in ("STR", "DEX", "CON", "INT", "WIS", "CHA")}
 
     species = (rep.get("species") or "Human")
     race_key, sub_key = "human", None
-    for sr in srd.subraces().values():
-        if sr["name"].lower() == species.lower():
-            sub_key = sr["index"]
-            race_key = _slug(sr["race"])
-    if not sub_key:
-        for r in srd.races().values():
-            if r["name"].lower() in species.lower():
-                race_key = r["index"]
+    if ruleset == "2024":
+        sp_all = ch._species_2024()
+        for idx, sp in sp_all.items():
+            if sp.get("name", "").lower() in species.lower():
+                race_key = idx
+                for sub in sp.get("subspecies", []):
+                    tail = sub["name"].split(":")[-1].strip().lower()
+                    if tail and tail in species.lower():
+                        sub_key = sub["index"]
                 break
         else:
-            issues.append({"issue": f"species {species} isn't in the SRD; speed and traits use Human", "fix": "—"})
+            issues.append({"issue": f"species {species} isn't in the free 2024 rules; its traits are kept as custom entries",
+                           "fix": "—"})
+    else:
+        for sr in srd.subraces().values():
+            if sr["name"].lower() == species.lower():
+                sub_key = sr["index"]
+                race_key = _slug(sr["race"])
+        if not sub_key:
+            for r in srd.races().values():
+                if r["name"].lower() in species.lower():
+                    race_key = r["index"]
+                    break
+            else:
+                issues.append({"issue": f"species {species} isn't in the free 2014 rules; its traits are kept as custom entries",
+                               "fix": "—"})
 
     profs, expertise = set(), set()
     skill_by_slug = {_slug(s): s for s in SKILLS}
@@ -89,17 +166,24 @@ def to_sheet(d: dict) -> dict:
             expertise.add(sk)
 
     bg_name = rep.get("background") or ""
-    bg_key = _slug(bg_name) if _slug(bg_name) in BACKGROUNDS else (bg_name or "acolyte")
+    bg_key = _slug(bg_name) if _slug(bg_name) in rules.BACKGROUNDS else (bg_name or next(iter(rules.BACKGROUNDS)))
+
+    sub_name = main.get("subclass")
+    sub_index = None
+    for s in cls["subclasses"]:
+        if sub_name and (s["name"].lower() in sub_name.lower() or sub_name.lower() in s["name"].lower()):
+            sub_index = s["index"]
 
     sheet: dict = {
-        "name": rep["name"][:40], "race": race_key, "subrace": sub_key, "class": cls_key, "subclass": main.get("subclass"),
-        "background": bg_key, "alignment": "True Neutral", "backstory": "", "color": "#5b8fd1",
-        "level": 1, "xp": 0, "abilities": scores, "base_abilities": dict(scores),
-        "skill_profs": sorted(profs), "expertise": sorted(expertise), "save_profs": list(CLASSES[cls_key]["saves"]),
+        "ruleset": ruleset, "name": rep["name"][:40], "race": race_key, "subrace": sub_key, "class": cls_key,
+        "subclass": sub_index or sub_name, "background": bg_key, "alignment": "True Neutral", "backstory": "",
+        "color": "#5b8fd1", "level": 1, "xp": 0, "level_target": 1, "abilities": scores, "base_abilities": dict(scores),
+        "bonus_abilities": [], "ancestry": None, "feats": [], "masteries": [], "exhaustion": 0,
+        "skill_profs": sorted(profs), "expertise": sorted(expertise), "save_profs": list(cls["saves"]),
         "fighting_style": None, "conditions": [], "death_saves": {"success": 0, "fail": 0}, "dead": False,
         "inspiration": bool(d.get("inspiration")), "gold_cp": 0, "inventory": [], "features": [],
-        "spells": {"cantrips": [], "spells": []}, "slots_used": {}, "hit_dice_used": 0, "temp_hp": 0,
-        "source": "ddb", "issues": issues, "ddb_id": d.get("id"),
+        "spells": {"cantrips": [], "spells": []}, "slots_used": {}, "pact_used": 0, "hit_dice_used": 0, "temp_hp": 0,
+        "concentration": None, "custom": [], "source": "ddb", "issues": issues, "ddb_id": d.get("id"),
     }
     cur = d.get("currencies") or {}
     sheet["gold_cp"] = int(cur.get("cp", 0) or 0) + 10 * int(cur.get("sp", 0) or 0) + 50 * int(cur.get("ep", 0) or 0) \
@@ -119,43 +203,72 @@ def to_sheet(d: dict) -> dict:
                         custom={"name": it["name"][:60], "description": "Imported from D&D Beyond.", "value_cp": 0,
                                 "category": "Treasure"})
 
-    spells = srd.spells()
-    by_name = {s["name"].lower(): k for k, s in spells.items()}
+    # spells: SRD ones become real spells; the rest are kept as custom spells
+    spells = srd.spells(ruleset)
+    by_name = {s["name"].lower().replace("'", ""): k for k, s in spells.items()}
+    extra_spells: list[dict] = []
     for cs in d.get("classSpells") or []:
         for sp in (cs or {}).get("spells") or []:
             df = sp.get("definition") or {}
-            k = by_name.get((df.get("name") or "").lower())
+            nm = (df.get("name") or "")
+            k = by_name.get(nm.lower().replace("'", ""))
             if not k:
+                if nm:
+                    extra_spells.append({"kind": "spell", "name": nm, "description": _text(df.get("description")),
+                                         "level": df.get("level"), "data": {"level": df.get("level")}})
                 continue
             if (df.get("level") or 0) == 0:
                 sheet["spells"]["cantrips"].append(k)
             elif sp.get("prepared") or sp.get("alwaysPrepared") or cls_key == "wizard":
                 sheet["spells"]["spells"].append(k)
 
-    hd = CLASSES[cls_key]["hit_die"]
+    # feats the game knows by name
+    for f in d.get("feats") or []:
+        nm = ((f.get("definition") or {}).get("name") or "")
+        if nm in rules.FEATS:
+            sheet["feats"].append(nm)
+
+    hd = cls["hit_die"]
     sheet["hp_max"] = hd + ch.mod(scores["CON"])
     sheet["hp"] = sheet["hp_max"]
-    sheet["level_target"] = 1
-    sheet["pact_used"] = 0
-    sheet["concentration"] = None
-    if CLASSES[cls_key]["subclass_level"] == 1:
-        sheet["subclass"] = CLASSES[cls_key]["subclasses"][0]["index"]
+    if cls["subclass_level"] == 1 and not sub_index:
+        sheet["subclass"] = cls["subclasses"][0]["index"]
     ch._grant_features(sheet, 1)
     sheet["spells"]["cantrips"] = list(dict.fromkeys(sheet["spells"]["cantrips"]))
     sheet["spells"]["spells"] = list(dict.fromkeys(sheet["spells"]["spells"]))
-    if (CLASSES[cls_key].get("spellcasting") or {}).get("spellbook"):
+    if (cls.get("spellcasting") or {}).get("spellbook"):
         sheet["spells"]["spellbook"] = list(sheet["spells"]["spells"])
-    # Level up with the imported picks kept: auto choices only fill what the import lacked.
-    for _ in range(2, min(level, MAX_LEVEL) + 1):
+    for _ in range(2, min(level, rules.MAX_LEVEL) + 1):
         auto = ch.auto_choices(sheet)
         auto.pop("cantrips", None)
         auto.pop("spells", None)
+        if sub_index and auto.get("subclass"):
+            auto["subclass"] = sub_index
         try:
             ch.level_up(sheet, auto)
         except RulesError:
             ch.level_up(sheet, ch.auto_choices(sheet))
-    if rep.get("hp_max") and level <= MAX_LEVEL:
+    if sub_name and not sub_index and sheet["level"] >= cls["subclass_level"]:
+        sheet["subclass"] = sub_name  # keep the player's own subclass name; its features come in as custom entries
+        sheet["features"] = [f for f in sheet["features"] if f["name"] not in SRD_SUBCLASS_FEATURES
+                             and not re.match(r"(Martial Archetype|Roguish Archetype|Arcane Tradition)", f["name"])]
+        issues.append({"issue": f"{sub_name} isn't in the free rules — its features are kept as text for the DM, and the "
+                                f"game's automatic subclass bonuses don't apply to it", "fix": "—"})
+    if rep.get("hp_max") and level <= rules.MAX_LEVEL:
         sheet["hp_max"] = sheet["hp"] = int(rep["hp_max"])
-    sheet["xp"] = XP_THRESHOLDS[sheet["level"]]
+    sheet["xp"] = rules.XP_THRESHOLDS[sheet["level"]]
     sheet["level_target"] = sheet["level"]
+
+    # keep everything the game's tables don't cover as custom entries the DM can read
+    have = {f["name"].lower() for f in sheet["features"]} | {f.lower() for f in sheet["feats"]}
+    kept = []
+    for f in _ddb_features(d, main) + extra_spells:
+        if f["name"].lower() in have:
+            continue
+        entry = {"entry_id": "ddb-" + uuid.uuid4().hex[:8], "kind": f["kind"], "name": f["name"][:80],
+                 "description": f["description"][:3000], "level": f.get("level"), "data": f.get("data") or {},
+                 "source": "ddb"}
+        sheet["custom"].append(entry)
+        kept.append(f["name"])
+    sheet["imported_custom"] = kept
     return sheet

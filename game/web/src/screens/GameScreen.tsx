@@ -19,6 +19,11 @@ import AwayControl from "../components/game/AwayControl";
 import CatchUp from "../components/game/CatchUp";
 import StoryHistory from "../components/game/StoryHistory";
 import { useIsMobile } from "../util/useMedia";
+import SceneBackdrop from "../components/atmosphere/SceneBackdrop";
+import SkyStrip from "../components/atmosphere/SkyStrip";
+import { AutoReadToggle, SoundChip } from "../components/atmosphere/AudioControls";
+import { useGameEffects } from "../components/atmosphere/useGameEffects";
+import DiceRoller from "../components/DiceRoller";
 
 type MobileTab = "story" | "map" | "party" | "sheet";
 
@@ -136,6 +141,12 @@ function GameLoaded({
   const [mobileTab, setMobileTab] = useState<MobileTab>("story");
   const [feedTab, setFeedTab] = useState<"live" | "story">("live");
   const spectator = view.me.role === "spectator";
+  useGameEffects(view);
+  const portraits = useMemo(() => {
+    const m: Record<string, string | null | undefined> = {};
+    for (const c of Object.values(view.characters)) m[c.id] = c.portrait_url;
+    return m;
+  }, [view.characters]);
 
   // Mark the log read up to the newest entry (once per new entry).
   const markedRef = useRef<string | number | null>(null);
@@ -348,7 +359,20 @@ function GameLoaded({
   const sheetEl = <SheetTabs viewedId={viewedId} onViewed={setViewedId} />;
   const feedBusy = view.dm.busy || view.phase.type === "dm";
   const feedEl = (
-    <div className="feed-wrap">
+    <div className="feed-wrap atmos">
+      <SceneBackdrop scene={view.scene} terrain={enc?.terrain ?? null} />
+      <div className="feed-sky">
+        <SkyStrip scene={enc ? { ...view.scene, type: enc.terrain } : view.scene} height={isMobile ? 40 : 52} />
+        <div className="feed-sky-overlay">
+          <span className="sky-caption">
+            {view.scene ? `Day ${view.scene.day} · ${view.scene.time_of_day}${view.scene.weather ? ` · ${view.scene.weather}` : ""}` : ""}
+          </span>
+          <span className="row gap center">
+            <AutoReadToggle />
+            <SoundChip />
+          </span>
+        </div>
+      </div>
       <div className="tabs small-tabs feed-tabs">
         <button className={feedTab === "live" ? "active" : ""} onClick={() => setFeedTab("live")}>
           Live
@@ -415,6 +439,7 @@ function GameLoaded({
                 <>
                   <BattleMap
                     encounter={enc}
+                    portraits={portraits}
                     reachable={combat.canAct && (!combat.budget || combat.budget.move_ft > 0) ? combat.reachable : []}
                     targets={combat.canAct ? combat.targets : []}
                     actorTokenId={enc.turn.actor_id ?? combat.activeToken?.id ?? null}
@@ -474,7 +499,8 @@ function GameLoaded({
 
   return (
     <GameContext.Provider value={ctx}>
-      <div className={`game-screen ${isMobile ? "mobile" : ""}`}>
+      <div className={`game-screen atmos ${isMobile ? "mobile" : ""}`}>
+        <SceneBackdrop scene={view.scene} terrain={enc?.terrain ?? null} subtle />
         <GameHeader onSettings={() => setModal("settings")} onTv={() => setModal("tv")} />
         {view.phase.error && (
           <div className="banner error">
@@ -534,6 +560,7 @@ function GameLoaded({
             {toast}
           </div>
         )}
+        <DiceRoller />
       </div>
     </GameContext.Provider>
   );

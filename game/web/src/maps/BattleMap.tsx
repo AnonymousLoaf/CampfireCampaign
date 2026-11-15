@@ -40,6 +40,7 @@ export default function BattleMap({
   aim,
   onAimPoint,
   onAimToken,
+  portraits,
 }: {
   encounter: Encounter;
   reachable?: [number, number][];
@@ -52,8 +53,16 @@ export default function BattleMap({
   aim?: Aim | null;
   onAimPoint?: (x: number, y: number) => void;
   onAimToken?: (token: Token) => void;
+  /** character_id → portrait URL; drawn clipped inside PC token circles. */
+  portraits?: Record<string, string | null | undefined>;
 }) {
   const { wrapRef, canvasRef, size } = useCanvasSize();
+  // Preload portraits; redraw once each image arrives.
+  const [imgTick, setImgTick] = useState(0);
+  const portraitFor = (t: Token): HTMLImageElement | null => {
+    const url = t.portrait_url || (t.character_id ? portraits?.[t.character_id] : null);
+    return url ? portraitImage(url, () => setImgTick((n) => n + 1)) : null;
+  };
   const [hover, setHover] = useState<{ x: number; y: number } | null>(null);
   const { w, h } = encounter.grid;
   const cell = Math.max(8, Math.floor(Math.min(size.w / w, size.h / h)));
@@ -180,9 +189,9 @@ export default function BattleMap({
       selected: t.id === selectedTargetId,
       hovered: !!hover && hover.x === t.x && hover.y === t.y,
       inTemplate: templateSet.has(`${t.x},${t.y}`),
-    });
+    }, portraitFor(t));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [encounter, size, cell, ox, oy, w, h, style, reachSet, targetSet, propMap, actorTokenId, selectedTargetId, hover, canvasRef, aim, templateSet]);
+  }, [encounter, size, cell, ox, oy, w, h, style, reachSet, targetSet, propMap, actorTokenId, selectedTargetId, hover, canvasRef, aim, templateSet, portraits, imgTick]);
 
   const squareAt = (e: React.MouseEvent) => {
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -680,6 +689,26 @@ function drawObstacle(ctx: CanvasRenderingContext2D, terrain: string, px: number
   }
 }
 
+/** Shared portrait image cache: loads once per URL, calls `onLoad` for every requester when ready. */
+const portraitCache = new Map<string, { img: HTMLImageElement; waiting: Set<() => void> | null }>();
+function portraitImage(url: string, onLoad: () => void): HTMLImageElement {
+  let e = portraitCache.get(url);
+  if (!e) {
+    const img = new Image();
+    const entry = { img, waiting: new Set<() => void>() as Set<() => void> | null };
+    img.onload = img.onerror = () => {
+      const w = entry.waiting;
+      entry.waiting = null;
+      w?.forEach((f) => f());
+    };
+    img.src = url;
+    portraitCache.set(url, entry);
+    e = entry;
+  }
+  if (e.waiting) e.waiting.add(onLoad);
+  return e.img;
+}
+
 function drawToken(
   ctx: CanvasRenderingContext2D,
   t: Token,
@@ -687,6 +716,7 @@ function drawToken(
   py: number,
   size: number,
   flags: { actor: boolean; target: boolean; selected: boolean; hovered: boolean; inTemplate?: boolean },
+  portrait: HTMLImageElement | null = null,
 ) {
   const cx = px + size / 2;
   const cy = py + size / 2;
@@ -738,16 +768,31 @@ function drawToken(
   ctx.beginPath();
   ctx.arc(cx, cy, r, 0, Math.PI * 2);
   ctx.fill();
+  const showPortrait = !!portrait && portrait.complete && portrait.naturalWidth > 0;
+  if (showPortrait) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, r - 1, 0, Math.PI * 2);
+    ctx.clip();
+    if (down || dead) ctx.filter = "grayscale(1)";
+    ctx.drawImage(portrait!, cx - r, cy - r, r * 2, r * 2);
+    ctx.restore();
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  }
   ctx.lineWidth = t.kind === "monster" ? 2.5 : 2;
-  ctx.strokeStyle = t.kind === "monster" ? "#2a0b0b" : "#f3e7c9";
+  ctx.strokeStyle = t.kind === "monster" ? "#2a0b0b" : t.color || "#f3e7c9";
+  if (t.kind === "pc" && !showPortrait) ctx.strokeStyle = "#f3e7c9";
   if (t.hp_state === "bloodied") ctx.strokeStyle = "#ff4d3d";
   ctx.stroke();
 
-  ctx.fillStyle = "#fff";
-  ctx.font = `700 ${Math.max(8, Math.round(r * 0.8))}px Inter, system-ui, sans-serif`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(initials(t.name), cx, cy + 1);
+  if (!showPortrait) {
+    ctx.fillStyle = "#fff";
+    ctx.font = `700 ${Math.max(8, Math.round(r * 0.8))}px Inter, system-ui, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(initials(t.name), cx, cy + 1);
+  }
   ctx.globalAlpha = 1;
 
   if (dead) {

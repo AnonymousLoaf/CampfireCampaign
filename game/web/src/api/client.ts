@@ -3,6 +3,8 @@ import type {
   CharacterView,
   CreateCharacter,
   CreatorOptions,
+  CustomEntry,
+  CustomEntryInput,
   GameSettings,
   GameSummary,
   GameView,
@@ -27,11 +29,13 @@ export class ApiError extends Error {
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const isForm = typeof FormData !== "undefined" && body instanceof FormData;
   const res = await fetch(`/api${path}`, {
     method,
     credentials: "include",
-    headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    // FormData sets its own multipart Content-Type (with boundary).
+    headers: body !== undefined && !isForm ? { "Content-Type": "application/json" } : undefined,
+    body: body === undefined ? undefined : isForm ? (body as FormData) : JSON.stringify(body),
   });
   let data: unknown = null;
   const text = await res.text();
@@ -96,8 +100,24 @@ export const api = {
   rollAbilities: () => post<AbilityRoll>("/characters/roll-abilities"),
   createCharacter: (c: CreateCharacter) => post<CharacterView>("/characters", c),
   importCharacter: (source: string) =>
-    post<{ character: CharacterView; issues: Issue[] }>("/characters/import", { source }),
+    post<{ character: CharacterView; issues: Issue[]; ruleset?: Ruleset }>("/characters/import", { source }),
   deleteCharacter: (id: string) => del<Ok>(`/characters/${id}`),
+
+  // portraits (M4)
+  uploadPortrait: (id: string, file: File) => {
+    const fd = new FormData();
+    fd.append("image", file);
+    return request<CharacterView>("POST", `/characters/${id}/portrait`, fd);
+  },
+  removePortrait: (id: string) => del<CharacterView>(`/characters/${id}/portrait`),
+
+  // custom content library (M4)
+  customList: () => get<CustomEntry[]>("/custom"),
+  customCreate: (e: CustomEntryInput) => post<CustomEntry>("/custom", e),
+  customUpdate: (id: string, e: CustomEntryInput) => put<CustomEntry>(`/custom/${id}`, e),
+  customDelete: (id: string) => del<Ok>(`/custom/${id}`),
+  attachCustom: (characterId: string, entry_id: string) => post<CharacterView>(`/characters/${characterId}/custom`, { entry_id }),
+  detachCustom: (characterId: string, entry_id: string) => del<CharacterView>(`/characters/${characterId}/custom/${entry_id}`),
 
   // games
   games: () => get<GameSummary[]>("/games"),

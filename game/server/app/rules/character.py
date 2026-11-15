@@ -1388,6 +1388,10 @@ def view(char_id: str, owner_id: str, game_id: str | None, sheet: dict) -> dict:
                       "uses": ({k: f["uses"][k] for k in ("max", "used", "per")} if f.get("uses") else None)}
                      for f in sheet.get("features", [])],
         "feats": feats, "masteries": masteries,
+        "custom": [{"entry_id": c.get("entry_id"), "kind": c.get("kind"), "name": c.get("name"),
+                    "description": c.get("description", ""), "level": c.get("level"), "source": c.get("source", "library")}
+                   for c in sheet.get("custom", [])],
+        "portrait_url": f"/api/files/portraits/{sheet['portrait']}" if sheet.get("portrait") else None,
         "actions": acts,
         "resistances": resistances(sheet),
         "fighting_style": sheet.get("fighting_style"),

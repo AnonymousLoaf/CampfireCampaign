@@ -11,6 +11,7 @@ import ImportCharacterModal from "../components/lobby/ImportCharacterModal";
 import CharacterCard from "../components/lobby/CharacterCard";
 import LevelUpModal from "../components/LevelUpModal";
 import SettingsPanel from "../components/lobby/SettingsPanel";
+import MyContentPanel from "../components/custom/MyContentPanel";
 
 export default function LobbyScreen({
   me,
@@ -153,11 +154,14 @@ export default function LobbyScreen({
                   c={c}
                   onDelete={c.game_id ? undefined : () => deleteCharacter(c.id)}
                   onLevelUp={c.game_id ? undefined : () => setLevelUpFor(c.id)}
+                  onChanged={() => void load()}
                 />
               ))}
             </div>
           )}
         </section>
+
+        <MyContentPanel />
 
         <SettingsPanel me={me} onMeChange={(m) => { onMeChange(m); void load(); }} />
       </main>

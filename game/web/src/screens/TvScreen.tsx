@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
 import { ABILITIES, type CharacterView, type GameView } from "../api/types";
 import { subscribe } from "../api/ws";
@@ -6,7 +6,13 @@ import WorldMap from "../maps/WorldMap";
 import BattleMap from "../maps/BattleMap";
 import { HpBar } from "../components/game/PartyPanel";
 import { LogItem } from "../components/game/StoryFeed";
-import { PHASE_LABEL, formatCountdown, formatMoney, initials, signed, useNow } from "../util/format";
+import { PHASE_LABEL, formatCountdown, formatMoney, signed, useNow } from "../util/format";
+import Portrait from "../components/Portrait";
+import DiceRoller from "../components/DiceRoller";
+import SceneBackdrop from "../components/atmosphere/SceneBackdrop";
+import SkyStrip from "../components/atmosphere/SkyStrip";
+import { AutoReadToggle, SoundChip } from "../components/atmosphere/AudioControls";
+import { useGameEffects } from "../components/atmosphere/useGameEffects";
 
 export default function TvScreen({ token }: { token: string }) {
   const [view, setView] = useState<GameView | null>(null);
@@ -50,6 +56,12 @@ function TvLayout({ view }: { view: GameView }) {
   const latest = narrations[narrations.length - 1];
   const recent = view.log.slice(-6).filter((e) => e.kind !== "narration");
   const chars = Object.values(view.characters);
+  useGameEffects(view, { tv: true });
+  const portraits = useMemo(() => {
+    const m: Record<string, string | null | undefined> = {};
+    for (const c of chars) m[c.id] = c.portrait_url;
+    return m;
+  }, [view.characters]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const whoseTurn = (() => {
     if (p.type === "combat" && enc) {
@@ -71,9 +83,11 @@ function TvLayout({ view }: { view: GameView }) {
   })();
 
   return (
-    <div className="tv">
+    <div className="tv atmos">
+      <SceneBackdrop scene={view.scene} terrain={enc?.terrain ?? null} />
       <header className="tv-header">
-        <div>
+        <SkyStrip scene={enc ? { ...view.scene, type: enc.terrain } : view.scene} height={96} className="tv-sky" />
+        <div className="tv-header-text">
           <div className="tv-title">{view.game.name}</div>
           <div className="tv-sub">
             {view.location?.name && <>📍 {view.location.name}</>}
@@ -91,13 +105,15 @@ function TvLayout({ view }: { view: GameView }) {
           <span className={`phase-pill big ${p.type}`}>{PHASE_LABEL[p.type] ?? p.type}</span>
           {whoseTurn && <span className="tv-turn">{whoseTurn}</span>}
           {p.deadline && p.type !== "dm" && <span className="tv-countdown">⏳ {formatCountdown(p.deadline, now)}</span>}
+          <AutoReadToggle tv />
+          <SoundChip tv />
         </div>
       </header>
 
       <div className="tv-grid">
         <section className="tv-map">
           {enc ? (
-            <BattleMap encounter={enc} interactive={false} actorTokenId={enc.turn.actor_id} />
+            <BattleMap encounter={enc} interactive={false} actorTokenId={enc.turn.actor_id} portraits={portraits} />
           ) : view.world ? (
             <WorldMap world={view.world} interactive={false} autoFit locationName={view.location?.name} />
           ) : (
@@ -175,7 +191,7 @@ function TvLayout({ view }: { view: GameView }) {
           {recent.length > 0 && (
             <div className="tv-recent">
               {recent.map((e) => (
-                <LogItem key={e.id} e={e} />
+                <LogItem key={e.id} e={e} speak={false} />
               ))}
             </div>
           )}
@@ -187,6 +203,7 @@ function TvLayout({ view }: { view: GameView }) {
           <TvCard key={c.id} c={c} active={!!enc && enc.tokens.some((t) => t.character_id === c.id && t.id === enc.turn.actor_id)} />
         ))}
       </footer>
+      <DiceRoller variant="tv" />
     </div>
   );
 }
@@ -196,9 +213,7 @@ function TvCard({ c, active }: { c: CharacterView; active: boolean }) {
   return (
     <div className={`tv-card ${active ? "active" : ""} ${c.down ? "down" : ""} ${c.dead ? "dead" : ""}`}>
       <div className="tv-card-top">
-        <span className="char-avatar" style={{ background: c.color }}>
-          {initials(c.name)}
-        </span>
+        <Portrait c={c} size="big" />
         <div className="tv-card-name">
           <div className="tv-name">{c.name}</div>
           <div className="muted">

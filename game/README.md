@@ -88,4 +88,11 @@ cd server
 - **History:** a Story tab with the whole campaign, a "Since you were last here" card, and "Catch me up" (the DM summarises what you missed).
 - **Phone layout:** bottom tabs (Story / Map / Party / Sheet), touch pan and pinch-zoom on maps, full-screen dialogs.
 
+**M4:**
+- **Atmosphere:** scene backgrounds that follow the location, time of day and battle map; an animated sky (sun and moon arc, stars, clouds, rain, snow, fog); synthesized ambience and sound effects (no audio files); spoken narration through the browser's own voices; animated dice rolls.
+- **Portraits:** upload your own (cropped to 256×256), or get a generated crest; shown everywhere, including battle-map tokens.
+- **Custom content library:** private homebrew or content from books you own — feats, features, spells, items, backgrounds, species traits — attached to characters; the DM reads them.
+- **D&D Beyond import, fixed:** 2024 ("5.5") characters import with the 2024 rules; features, feats and traits the free rules don't cover are kept as custom entries the DM can use; non-SRD subclasses keep their own name and features.
+- **The DM is told which ruleset the game uses** (it said "SRD 5.1, levels 1-5" before).
+
 Not yet: levels above 10, monster spellcasting, opportunity attacks along the path (they check start and end squares), Great Weapon Fighting rerolls, ammunition recovery, Evasion (no monster area attacks yet), public hosting.

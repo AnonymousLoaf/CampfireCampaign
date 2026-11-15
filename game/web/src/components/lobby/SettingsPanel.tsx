@@ -3,6 +3,7 @@ import { api } from "../../api/client";
 import type { Me, Meta } from "../../api/types";
 import ErrorText, { useAction } from "../ErrorText";
 import { disablePush, enablePush, pushSubscribed, pushSupported } from "../../util/push";
+import { AudioSettings } from "../atmosphere/AudioControls";
 
 export default function SettingsPanel({ me, onMeChange }: { me: Me; onMeChange: (m: Me) => void }) {
   const [key, setKey] = useState("");
@@ -56,6 +57,13 @@ export default function SettingsPanel({ me, onMeChange }: { me: Me; onMeChange: 
       <ErrorText error={saveErr || removeErr} />
 
       <NotificationSettings me={me} onMeChange={onMeChange} />
+
+      <h3>Sound &amp; narration</h3>
+      <p className="muted small">
+        Ambience and effects are synthesized in your browser; narration is read by your browser's built-in voices. Nothing
+        is downloaded or sent anywhere.
+      </p>
+      <AudioSettings />
     </section>
   );
 }

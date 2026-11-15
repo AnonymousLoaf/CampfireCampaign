@@ -478,7 +478,8 @@ def resolve_attack(enc: dict, chars: dict, att: dict, tgt: dict, *, name: str, t
     crit = hit and (r["natural"] >= crit_on or auto_crit)
     adv_txt = {"advantage": " (adv)", "disadvantage": " (dis)"}.get(adv, "")
     head = f"{att['name']} attacks {tgt['name']} with {name}: {r['total']}{adv_txt} vs AC {ac}"
-    data = {"attacker": att["id"], "target": tgt["id"], "roll": r, "ac": ac, "hit": hit, "crit": crit}
+    data = {"attacker": att["id"], "target": tgt["id"], "roll": r, "ac": ac, "hit": hit, "crit": crit,
+            "attack": name, "damage_type": dtype, "ranged": ranged, "spell": spell}
     if not hit:
         out = [line(head + " — miss.", "combat", **data)]
         if mastery == "Graze" and ability_mod > 0 and weapon:

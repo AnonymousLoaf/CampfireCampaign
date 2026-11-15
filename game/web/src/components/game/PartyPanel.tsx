@@ -1,6 +1,6 @@
 import type { CharacterView, GameView } from "../../api/types";
-import { initials } from "../../util/format";
 import { LevelUpBadge } from "../LevelUpModal";
+import Portrait from "../Portrait";
 
 /** "until Fri 18:00", "until they're back" — or null when the member isn't away. */
 export function awayLabel(until: string | null | undefined): string | null {
@@ -74,9 +74,7 @@ export default function PartyPanel({
         return (
           <div key={c.id} className={`party-card ${selectedId === c.id ? "selected" : ""} ${c.down ? "down" : ""} ${c.dead ? "dead" : ""}`} onClick={() => onSelect(c.id)}>
             <div className="party-card-top">
-              <span className="char-avatar small" style={{ background: c.color }}>
-                {initials(c.name)}
-              </span>
+              <Portrait c={c} size="small" />
               <div className="party-card-name">
                 <div>
                   <strong>{c.name}</strong> {isMe && <span className="muted small">(you)</span>}

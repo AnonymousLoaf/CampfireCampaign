@@ -5,10 +5,14 @@ import json
 import secrets
 from typing import Any, Callable
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
+import re
+
+from fastapi import (APIRouter, Cookie, Depends, File, HTTPException, Request, Response, UploadFile, WebSocket,
+                     WebSocketDisconnect)
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from . import ddb
@@ -19,7 +23,9 @@ from .game.hub import Conn, hub
 from .game import notify
 from .game.notify import nudge as send_nudge
 from .game.state import LIVE_EDITABLE, Ctx, build_view, clean_settings, load, lock_for
-from .models import AbilityRoll, Character, Game, LogEntry, Membership, PushSubscription, SessionToken, User
+from .config import DATA_DIR
+from .models import (AbilityRoll, Character, CustomEntry, Game, LogEntry, Membership, PushSubscription, SessionToken,
+                     User)
 from .rules import character as ch
 from .rules import dice, srd
 from .rules import shop as shop_rules
@@ -278,10 +284,224 @@ async def import_character(body: ImportBody, u: User = Depends(current_user), db
         sheet = ddb.to_sheet(data)
     except RulesError as e:
         raise HTTPException(400, str(e))
+    kept = sheet.pop("imported_custom", [])
     c = Character(owner_id=u.id, name=sheet["name"], sheet=sheet)
     db.add(c)
     db.commit()
-    return {"character": _char_view(c), "issues": sheet.get("issues", [])}
+    return {"character": _char_view(c), "issues": sheet.get("issues", []), "ruleset": sheet.get("ruleset", "2014"),
+            "kept_as_custom": kept}
+
+
+# ── editing a character safely (in or out of a game) ────────────────────────
+
+async def _edit_character(u: User, cid: str, fn: Callable[[dict], Any]) -> dict:
+    """Apply fn(sheet). Characters in an active game are edited through the game's lock so a DM turn can't clobber it."""
+    db = SessionLocal()
+    try:
+        c = db.get(Character, cid)
+        if not c or c.owner_id != u.id:
+            raise HTTPException(404, "character not found")
+        g = db.get(Game, c.game_id) if c.game_id else None
+        gid = g.id if g and g.status == "active" else None
+    finally:
+        db.close()
+    if gid:
+        async with lock_for(gid):
+            db = SessionLocal()
+            try:
+                ctx = load(db, gid)
+                if ctx.game.dm_busy or ctx.phase.get("type") == "dm":
+                    raise HTTPException(409, "the DM is writing — try again in a moment")
+                try:
+                    fn(ctx.chars[cid])
+                except RulesError as e:
+                    raise HTTPException(400, str(e))
+                ctx.save()
+                await flow.changed(ctx)
+                row = db.get(Character, cid)
+                return ch.view(row.id, row.owner_id, row.game_id, row.sheet)
+            finally:
+                db.close()
+    from sqlalchemy.orm.attributes import flag_modified
+    db = SessionLocal()
+    try:
+        c = db.get(Character, cid)
+        sheet = json.loads(json.dumps(c.sheet))
+        try:
+            fn(sheet)
+        except RulesError as e:
+            raise HTTPException(400, str(e))
+        c.sheet = sheet
+        flag_modified(c, "sheet")
+        db.commit()
+        return ch.view(c.id, c.owner_id, c.game_id, c.sheet)
+    finally:
+        db.close()
+
+
+# ── portraits ──────────────────────────────────────────────────────────────
+
+PORTRAIT_DIR = DATA_DIR / "portraits"
+
+
+@router.post("/characters/{cid}/portrait")
+async def upload_portrait(cid: str, image: UploadFile = File(...), u: User = Depends(current_user)):
+    from io import BytesIO
+
+    from PIL import Image, UnidentifiedImageError
+    raw = await image.read(3 * 1024 * 1024 + 1)
+    if len(raw) > 3 * 1024 * 1024:
+        raise HTTPException(400, "portraits can be up to 3 MB")
+    try:
+        img = Image.open(BytesIO(raw))
+        if img.format not in ("PNG", "JPEG", "WEBP"):
+            raise HTTPException(400, "use a PNG, JPEG or WebP image")
+        img = img.convert("RGB")
+    except (UnidentifiedImageError, OSError):
+        raise HTTPException(400, "that file isn't an image")
+    w, h = img.size
+    side = min(w, h)
+    img = img.crop(((w - side) // 2, (h - side) // 4, (w - side) // 2 + side, (h - side) // 4 + side))
+    img = img.resize((256, 256), Image.LANCZOS)
+    PORTRAIT_DIR.mkdir(parents=True, exist_ok=True)
+    name = secrets.token_urlsafe(16) + ".webp"
+    img.save(PORTRAIT_DIR / name, "WEBP", quality=85)
+    old: dict = {}
+
+    def fn(sheet: dict) -> None:
+        old["name"] = sheet.get("portrait")
+        sheet["portrait"] = name
+    view = await _edit_character(u, cid, fn)
+    if old.get("name"):
+        (PORTRAIT_DIR / old["name"]).unlink(missing_ok=True)
+    return view
+
+
+@router.delete("/characters/{cid}/portrait")
+async def delete_portrait(cid: str, u: User = Depends(current_user)):
+    old: dict = {}
+
+    def fn(sheet: dict) -> None:
+        old["name"] = sheet.pop("portrait", None)
+    view = await _edit_character(u, cid, fn)
+    if old.get("name"):
+        (PORTRAIT_DIR / old["name"]).unlink(missing_ok=True)
+    return view
+
+
+@router.get("/files/portraits/{name}")
+def get_portrait(name: str):
+    if not re.fullmatch(r"[A-Za-z0-9_-]{16,40}\.webp", name):
+        raise HTTPException(404, "not found")
+    path = PORTRAIT_DIR / name
+    if not path.exists():
+        raise HTTPException(404, "not found")
+    return FileResponse(path, media_type="image/webp", headers={"Cache-Control": "public, max-age=31536000, immutable"})
+
+
+# ── custom content library ──────────────────────────────────────────────────
+
+CUSTOM_KINDS = {"feat", "feature", "spell", "item", "background", "species_trait"}
+
+
+class CustomBody(BaseModel):
+    kind: str
+    name: str = Field(min_length=1, max_length=80)
+    description: str = Field(default="", max_length=6000)
+    level: int | None = Field(default=None, ge=0, le=20)
+    data: dict = Field(default_factory=dict)
+
+
+def _custom_dict(e: CustomEntry) -> dict:
+    return {"id": e.id, "kind": e.kind, "name": e.name, "description": e.description, "level": e.level,
+            "data": e.data or {}, "created_at": e.created_at.isoformat() if e.created_at else None}
+
+
+def _clean_custom(body: CustomBody) -> dict:
+    if body.kind not in CUSTOM_KINDS:
+        raise HTTPException(400, "kind must be one of: " + ", ".join(sorted(CUSTOM_KINDS)))
+    data = {k: v for k, v in (body.data or {}).items() if isinstance(k, str) and len(k) < 40}
+    if len(json.dumps(data)) > 4000:
+        raise HTTPException(400, "too much extra data")
+    return {"kind": body.kind, "name": body.name.strip(), "description": body.description.strip(), "level": body.level,
+            "data": data}
+
+
+@router.get("/custom")
+def list_custom(u: User = Depends(current_user), db: Session = Depends(get_db)):
+    rows = db.scalars(select(CustomEntry).where(CustomEntry.user_id == u.id).order_by(CustomEntry.kind, CustomEntry.name))
+    return [_custom_dict(e) for e in rows]
+
+
+@router.post("/custom")
+def create_custom(body: CustomBody, u: User = Depends(current_user), db: Session = Depends(get_db)):
+    if db.scalar(select(func.count(CustomEntry.id)).where(CustomEntry.user_id == u.id)) >= 500:
+        raise HTTPException(400, "your library is full (500 entries)")
+    e = CustomEntry(user_id=u.id, **_clean_custom(body))
+    db.add(e)
+    db.commit()
+    return _custom_dict(e)
+
+
+@router.put("/custom/{eid}")
+def update_custom(eid: str, body: CustomBody, u: User = Depends(current_user), db: Session = Depends(get_db)):
+    e = db.get(CustomEntry, eid)
+    if not e or e.user_id != u.id:
+        raise HTTPException(404, "entry not found")
+    for k, v in _clean_custom(body).items():
+        setattr(e, k, v)
+    db.commit()
+    return _custom_dict(e)
+
+
+@router.delete("/custom/{eid}")
+def delete_custom(eid: str, u: User = Depends(current_user), db: Session = Depends(get_db)):
+    e = db.get(CustomEntry, eid)
+    if not e or e.user_id != u.id:
+        raise HTTPException(404, "entry not found")
+    db.delete(e)
+    db.commit()
+    return {"ok": True}
+
+
+class AttachBody(BaseModel):
+    entry_id: str
+
+
+@router.post("/characters/{cid}/custom")
+async def attach_custom(cid: str, body: AttachBody, u: User = Depends(current_user)):
+    db = SessionLocal()
+    try:
+        e = db.get(CustomEntry, body.entry_id)
+        if not e or e.user_id != u.id:
+            raise HTTPException(404, "entry not found")
+        entry = _custom_dict(e)
+    finally:
+        db.close()
+
+    def fn(sheet: dict) -> None:
+        if any(c.get("entry_id") == entry["id"] for c in sheet.get("custom", [])):
+            raise RulesError("that's already on this character")
+        if entry["kind"] == "item":
+            d = entry["data"]
+            ch.add_item(sheet, "custom-" + entry["id"], 1, custom={
+                "name": entry["name"][:60], "description": entry["description"][:1000],
+                "value_cp": int(float(d.get("value_gp") or 0) * 100), "weight": d.get("weight") or 0,
+                "category": d.get("category") or "Treasure"})
+        sheet.setdefault("custom", []).append({"entry_id": entry["id"], "kind": entry["kind"], "name": entry["name"],
+                                               "description": entry["description"], "level": entry["level"],
+                                               "data": entry["data"], "source": "library"})
+    return await _edit_character(u, cid, fn)
+
+
+@router.delete("/characters/{cid}/custom/{entry_id}")
+async def detach_custom(cid: str, entry_id: str, u: User = Depends(current_user)):
+    def fn(sheet: dict) -> None:
+        before = len(sheet.get("custom", []))
+        sheet["custom"] = [c for c in sheet.get("custom", []) if c.get("entry_id") != entry_id]
+        if len(sheet["custom"]) == before:
+            raise RulesError("that isn't on this character")
+    return await _edit_character(u, cid, fn)
 
 
 def _in_active_game(db: Session, c: Character) -> bool:

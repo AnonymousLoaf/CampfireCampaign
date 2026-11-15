@@ -15,6 +15,37 @@ HALF_CASTER_SLOTS_2024 = {1: {"1": 2}, 2: {"1": 2}, 3: {"1": 3}, 4: {"1": 3}, 5:
                           7: {"1": 4, "2": 3}, 8: {"1": 4, "2": 3}, 9: {"1": 4, "2": 3, "3": 2}, 10: {"1": 4, "2": 3, "3": 2}}
 
 
+# Features that come from the one SRD subclass of each class (both editions). Used to strip them from a character
+# whose real subclass is a different one (e.g. imported from D&D Beyond).
+SRD_SUBCLASS_FEATURES = {
+    # Champion
+    "Improved Critical", "Remarkable Athlete", "Additional Fighting Style", "Heroic Warrior", "Superior Critical", "Survivor",
+    # Berserker
+    "Frenzy", "Mindless Rage", "Intimidating Presence", "Retaliation",
+    # Lore
+    "Cutting Words", "Bonus Proficiencies", "Additional Magical Secrets", "Magical Discoveries", "Peerless Skill",
+    # Life
+    "Disciple of Life", "Preserve Life", "Blessed Healer", "Divine Strike", "Supreme Healing", "Life Domain Spells",
+    # Land
+    "Bonus Cantrip", "Natural Recovery", "Land's Stride", "Circle Spells", "Land's Aid", "Nature's Ward",
+    # Open Hand
+    "Open Hand Technique", "Wholeness of Body", "Tranquility", "Fleet Step", "Quivering Palm",
+    # Devotion
+    "Sacred Weapon", "Aura of Devotion", "Purity of Spirit", "Oath of Devotion Spells", "Smite of Protection", "Divine Health",
+    # Hunter
+    "Colossus Slayer", "Hunter's Prey", "Defensive Tactics", "Hunter's Lore", "Superior Hunter's Prey", "Multiattack",
+    "Primeval Awareness",
+    # Thief
+    "Fast Hands", "Second-Story Work", "Supreme Sneak", "Use Magic Device",
+    # Draconic
+    "Draconic Resilience", "Elemental Affinity", "Dragon Wings", "Draconic Spells",
+    # Fiend
+    "Dark One's Blessing", "Dark One's Own Luck", "Fiendish Resilience", "Fiend Spells",
+    # Evocation
+    "Sculpt Spells", "Potent Cantrip", "Empowered Evocation", "Evocation Savant", "Overchannel",
+}
+
+
 @dataclass
 class Rules:
     key: str

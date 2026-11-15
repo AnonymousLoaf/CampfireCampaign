@@ -313,6 +313,39 @@ export interface CharacterView {
   feats?: { name: string; description: string }[];
   masteries?: { weapon_key: string; name: string; mastery: string; description: string }[];
   exhaustion?: number;
+  // M4
+  portrait_url?: string | null;
+  custom?: AttachedCustom[];
+}
+
+export type CustomKind = "feat" | "feature" | "spell" | "item" | "background" | "species_trait";
+
+/** A custom entry attached to a character (homebrew or content from a book the player owns). */
+export interface AttachedCustom {
+  entry_id: string;
+  kind: CustomKind;
+  name: string;
+  description: string;
+  level?: number | null;
+}
+
+/** An entry in my private custom content library. */
+export interface CustomEntry {
+  id: string;
+  kind: CustomKind;
+  name: string;
+  description: string;
+  level: number | null;
+  data: Record<string, unknown>;
+  created_at?: string;
+}
+
+export interface CustomEntryInput {
+  kind: CustomKind;
+  name: string;
+  description: string;
+  level?: number | null;
+  data?: Record<string, unknown>;
 }
 
 export interface CreateCharacter {
@@ -528,6 +561,8 @@ export interface Token {
   concentrating?: boolean;
   raging?: boolean;
   marked?: boolean;
+  /** M4: a PC token may carry its character's portrait (the frontend also looks it up by character_id). */
+  portrait_url?: string | null;
 }
 
 export type Terrain = "road" | "forest" | "tavern" | "cave" | "dungeon" | "ruins" | "camp" | "swamp";

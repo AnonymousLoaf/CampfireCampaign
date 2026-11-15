@@ -1,14 +1,17 @@
 import { useState } from "react";
 import { api } from "../../api/client";
-import { ABILITIES, type CharacterView, type Item, type Spell } from "../../api/types";
+import { ABILITIES, type CharacterView, type CustomKind, type Item, type Spell } from "../../api/types";
 import { formatMoney, signed } from "../../util/format";
 import { useGame } from "./gameContext";
 import { SpellBadges } from "../LevelUpModal";
+import Portrait, { PortraitEditor } from "../Portrait";
+import CustomPicker from "../custom/CustomPicker";
+import { KIND_LABEL } from "../custom/MyContentPanel";
 
 type Tab = "sheet" | "inventory" | "spells" | "quests" | "npcs";
 
 export default function SheetTabs({ viewedId, onViewed }: { viewedId: string | null; onViewed: (id: string) => void }) {
-  const { view, controls, openLevelUp } = useGame();
+  const { view, controls, openLevelUp, run } = useGame();
   const [tab, setTab] = useState<Tab>("sheet");
   const c = viewedId ? view.characters[viewedId] : undefined;
   const editable = !!c && controls.includes(c.id);
@@ -48,7 +51,13 @@ export default function SheetTabs({ viewedId, onViewed }: { viewedId: string | n
         </div>
       )}
       <div className="sheet-body">
-        {tab === "sheet" && c && <CharacterSheet c={c} onLevelUp={editable && openLevelUp ? () => openLevelUp(c.id) : undefined} />}
+        {tab === "sheet" && c && (
+          <CharacterSheet
+            c={c}
+            onLevelUp={editable && openLevelUp ? () => openLevelUp(c.id) : undefined}
+            manage={c.owner_id === view.me.user_id ? run : undefined}
+          />
+        )}
         {tab === "inventory" && c && <Inventory c={c} editable={editable} />}
         {tab === "spells" && c?.spellcasting && <Spells c={c} editable={editable} />}
         {tab === "quests" && (
@@ -82,9 +91,62 @@ export default function SheetTabs({ viewedId, onViewed }: { viewedId: string | n
   );
 }
 
-export function CharacterSheet({ c, onLevelUp }: { c: CharacterView; onLevelUp?: () => void }) {
+/** Custom entries (homebrew / own books) of the given kinds, with a "custom" tag and, for the owner, a detach button. */
+function CustomEntries({ c, kinds, manage }: { c: CharacterView; kinds: CustomKind[]; manage?: (fn: () => Promise<unknown>) => Promise<boolean> }) {
+  const list = (c.custom ?? []).filter((x) => kinds.includes(x.kind));
+  return (
+    <>
+      {list.map((x) => (
+        <details key={x.entry_id} className="feature custom">
+          <summary>
+            {x.name} <span className="badge tiny custom-tag">custom</span>
+            {x.kind !== "feat" && x.kind !== "feature" && <span className="muted small"> · {KIND_LABEL[x.kind] ?? x.kind}</span>}
+            {x.level !== null && x.level !== undefined && x.kind === "spell" && <span className="muted small"> · {x.level === 0 ? "cantrip" : `L${x.level}`}</span>}
+            {manage && (
+              <button
+                className="chip-x"
+                title="Detach from this character"
+                onClick={(e) => {
+                  e.preventDefault();
+                  void manage(() => api.detachCustom(c.id, x.entry_id));
+                }}
+              >
+                ×
+              </button>
+            )}
+          </summary>
+          <div className="small pre">{x.description}</div>
+        </details>
+      ))}
+    </>
+  );
+}
+
+export function CharacterSheet({
+  c,
+  onLevelUp,
+  manage,
+}: {
+  c: CharacterView;
+  onLevelUp?: () => void;
+  /** Present when I own this character: portrait upload and custom content. */
+  manage?: (fn: () => Promise<unknown>) => Promise<boolean>;
+}) {
+  const custom = c.custom ?? [];
+  const has = (...k: CustomKind[]) => custom.some((x) => k.includes(x.kind));
   return (
     <div className="char-sheet">
+      <div className="sheet-header">
+        {manage ? (
+          <PortraitEditor c={c} size="big" upload={(f) => manage(() => api.uploadPortrait(c.id, f))} remove={() => manage(() => api.removePortrait(c.id))} />
+        ) : (
+          <Portrait c={c} size="big" />
+        )}
+        <div className="sheet-header-name">
+          <div className="sheet-name">{c.name}</div>
+          {manage && <CustomPicker c={c} run={manage} />}
+        </div>
+      </div>
       {c.pending_level_up && (
         <div className="levelup-banner">
           <span>✦ Level {c.pending_level_up.to_level} is ready!</span>
@@ -178,15 +240,22 @@ export function CharacterSheet({ c, onLevelUp }: { c: CharacterView; onLevelUp?:
           ))}
         </>
       )}
-      {c.feats && c.feats.length > 0 && (
+      {((c.feats && c.feats.length > 0) || has("feat")) && (
         <>
           <h4>Feats</h4>
-          {c.feats.map((f) => (
+          {(c.feats ?? []).map((f) => (
             <details key={f.name} className="feature">
               <summary>{f.name}</summary>
               <div className="small">{f.description}</div>
             </details>
           ))}
+          <CustomEntries c={c} kinds={["feat"]} manage={manage} />
+        </>
+      )}
+      {has("spell") && (
+        <>
+          <h4>Custom spells</h4>
+          <CustomEntries c={c} kinds={["spell"]} manage={manage} />
         </>
       )}
       {c.actions && c.actions.length > 0 && (
@@ -224,6 +293,7 @@ export function CharacterSheet({ c, onLevelUp }: { c: CharacterView; onLevelUp?:
           <div className="small">{f.description}</div>
         </details>
       ))}
+      <CustomEntries c={c} kinds={["feature", "background", "species_trait"]} manage={manage} />
       {c.issues.length > 0 && (
         <>
           <h4>Import notes</h4>
@@ -441,6 +511,12 @@ function Spells({ c, editable }: { c: CharacterView; editable: boolean }) {
         </div>
       ) : (
         <div className="spell-list">{sc.spells.map((s) => <SpellCard key={s.index} s={s} />)}</div>
+      )}
+      {(c.custom ?? []).some((x) => x.kind === "spell") && !editing && (
+        <>
+          <h4>Custom spells</h4>
+          <CustomEntries c={c} kinds={["spell"]} />
+        </>
       )}
       {sc.spellbook && sc.spellbook.length > 0 && !editing && (
         <details className="feature">

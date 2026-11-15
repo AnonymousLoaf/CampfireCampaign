@@ -7,6 +7,7 @@ import "./styles/creator.css";
 import "./styles/game.css";
 import "./styles/m2.css";
 import "./styles/m3.css";
+import "./styles/m4.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

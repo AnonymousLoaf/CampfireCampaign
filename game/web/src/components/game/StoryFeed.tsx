@@ -1,5 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { LogEntry } from "../../api/types";
+import { D20Icon } from "../DiceRoller";
+import { SpeakButton } from "../atmosphere/AudioControls";
 
 export function Paragraphs({ text }: { text: string }) {
   const paras = text.split(/\n{2,}|\r\n\r\n/).map((p) => p.trim()).filter(Boolean);
@@ -19,36 +21,55 @@ export function Paragraphs({ text }: { text: string }) {
   );
 }
 
+type RollData = {
+  roll?: { rolls?: number[]; natural?: number; total?: number; modifier?: number };
+  dc?: number | null;
+  // older entries kept the numbers at the top level
+  rolls?: number[];
+  total?: number;
+  success?: boolean | null;
+};
+
 function RollChip({ e }: { e: LogEntry }) {
-  const d = (e.data ?? {}) as { rolls?: number[]; total?: number; success?: boolean | null; modifier?: number };
+  const d = (e.data ?? {}) as RollData;
+  const rolls = d.roll?.rolls ?? d.rolls;
+  const total = d.roll?.total ?? d.total;
+  const natural = d.roll?.natural ?? (rolls && rolls.length === 1 ? rolls[0] : undefined);
+  const success = typeof d.success === "boolean" ? d.success : typeof d.dc === "number" && typeof total === "number" ? total >= d.dc : null;
+  const tone = natural === 20 ? "crit" : natural === 1 ? "fumble" : "";
   return (
-    <div className="log-roll">
-      <span className="dice-icon">🎲</span>
+    <div className={`log-roll ${tone}`}>
+      {typeof natural === "number" ? (
+        <D20Icon value={natural} size={26} tone={tone} title={`Natural ${natural}`} />
+      ) : (
+        <span className="dice-icon">🎲</span>
+      )}
       <span className="roll-text">
         {e.author && <strong>{e.author}: </strong>}
         {e.text}
       </span>
-      {Array.isArray(d.rolls) && d.rolls.length > 0 && (
+      {Array.isArray(rolls) && rolls.length > 1 && (
         <span className="dice-row inline">
-          {d.rolls.map((r, i) => (
-            <span key={i} className={`die small ${r === 20 ? "crit" : r === 1 ? "fumble" : ""}`}>
+          {rolls.map((r, i) => (
+            <span key={i} className={`die small ${r === 20 ? "crit" : r === 1 ? "fumble" : ""} ${r === natural ? "kept" : "dropped"}`}>
               {r}
             </span>
           ))}
-          {typeof d.total === "number" && <span className="roll-total-inline">= {d.total}</span>}
         </span>
       )}
-      {d.success === true && <span className="badge green">success</span>}
-      {d.success === false && <span className="badge red">fail</span>}
+      {typeof total === "number" && <span className="roll-total-inline">= {total}</span>}
+      {success === true && <span className="badge green">success</span>}
+      {success === false && <span className="badge red">fail</span>}
     </div>
   );
 }
 
-export function LogItem({ e }: { e: LogEntry }) {
+export function LogItem({ e, speak = true }: { e: LogEntry; speak?: boolean }) {
   switch (e.kind) {
     case "narration":
       return (
         <div className="log-narration">
+          {speak && <SpeakButton id={String(e.id)} text={e.text} />}
           <Paragraphs text={e.text} />
         </div>
       );
@@ -110,6 +131,7 @@ export default function StoryFeed({
   // Our own scrolling (sticking to the newest entry) also fires scroll events; only the reader's scrolling counts as reading.
   const programmatic = useRef(false);
   const userScrolled = useRef(false);
+  const firstLastId = useRef(lastId);
 
   useEffect(() => {
     const el = ref.current;
@@ -117,8 +139,10 @@ export default function StoryFeed({
       programmatic.current = true;
       el.scrollTop = el.scrollHeight;
     }
-    // New entries arriving while the reader sits at the bottom (after they've scrolled once) count as read.
-    if (el && onAtBottom && userScrolled.current && stick.current) onAtBottom();
+    // New entries arriving while the reader is here and sitting at the bottom count as read: after they've
+    // scrolled once, or as soon as anything new arrives while the page is on screen (they're playing live).
+    const arrivedWhileHere = lastId !== firstLastId.current && document.visibilityState === "visible";
+    if (el && onAtBottom && stick.current && (userScrolled.current || arrivedWhileHere)) onAtBottom();
   }, [lastId, busy]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
