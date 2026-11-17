@@ -1002,7 +1002,8 @@ def _roll_spell_dice(ctx: Ctx, roll: dict) -> dict:
                f"{roll.get('bonus', 0):+d})."
     roll["result"] = {"total": total, "rolls": r.rolls, "modifier": roll.get("bonus", 0), "natural": None,
                       "success": None, "lines": [text], "text": text}
-    ctx.log("roll", text, None, {"roll": r.as_dict(), "character_id": roll["character_id"]})
+    ctx.log("roll", text, None, {"roll": r.as_dict(), "character_id": roll["character_id"], "spell_total": total,
+                                 "bonus": roll.get("bonus", 0), "what": roll.get("what")})
     return roll
 
 
