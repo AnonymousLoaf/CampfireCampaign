@@ -94,3 +94,21 @@ def test_a_narration_gets_shared_audio(monkeypatch):
         finally:
             db.close()
         assert "captain ilsa vane" in saved and saved["captain ilsa vane"]["mix"][0][0].startswith(("af_", "bf_"))
+
+
+def test_settings_voice_test_endpoint(monkeypatch):
+    fake = FakeKokoro()
+    monkeypatch.setattr(voices, "_get_engine", lambda: fake)
+    with TestClient(app):
+        c = _client("voicetester")
+        monkeypatch.setattr(voices, "available", lambda: False)
+        assert c.get("/api/voices").json()["available"] is False
+        assert c.post("/api/voices/test", json={"text": "Hello"}).status_code == 503
+        monkeypatch.setattr(voices, "available", lambda: True)
+        listing = c.get("/api/voices").json()
+        assert listing["available"] and "af_bella" in listing["voices"]
+        r = c.post("/api/voices/test", json={"text": "Mind the forty-third rung.", "voice": "am_adam",
+                                             "blend": "bm_george", "blend_weight": 0.3, "speed": 0.9, "pitch": 6})
+        assert r.status_code == 200 and r.headers["content-type"] == "audio/mpeg" and len(r.content) > 100
+        assert abs(fake.calls[-1][2] - 0.9 / 2 ** 0.5) < 1e-6  # half an octave up: synthesised slower, then raised
+        assert c.post("/api/voices/test", json={"text": "x", "voice": "not_a_voice"}).status_code == 400

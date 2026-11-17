@@ -480,6 +480,47 @@ async def generate_portrait(cid: str, body: GeneratePortraitBody, u: User = Depe
     return view
 
 
+class VoiceTestBody(BaseModel):
+    text: str = Field(min_length=1, max_length=300)
+    voice: str = "narrator"
+    blend: str | None = None
+    blend_weight: float = Field(default=0.3, ge=0, le=0.9)
+    speed: float = Field(default=1.0, ge=0.6, le=1.5)
+    pitch: float = Field(default=0.0, ge=-6, le=6)
+
+
+@router.get("/voices")
+def list_voices(u: User = Depends(current_user)):
+    """Whether character voices work on this server, and the voices to try in Settings."""
+    from .game import voices
+    return {"available": voices.available(), "voices": voices.FEMALE + voices.MALE,
+            "narrator": voices.NARRATOR}
+
+
+@router.post("/voices/test")
+async def test_voice(body: VoiceTestBody, u: User = Depends(current_user)):
+    """Speak a line in a chosen voice recipe (Settings → Test voices). Nothing is saved."""
+    from fastapi.responses import Response
+
+    from .game import voices
+    if not voices.available():
+        raise HTTPException(503, "character voices aren't set up on this server")
+    allowed = set(voices.FEMALE + voices.MALE)
+    if body.voice == "narrator":
+        recipe = dict(voices.NARRATOR)
+    elif body.voice in allowed:
+        mix = [[body.voice, 1.0]]
+        if body.blend in allowed and body.blend != body.voice and body.blend_weight > 0:
+            mix = [[body.voice, round(1 - body.blend_weight, 2)], [body.blend, round(body.blend_weight, 2)]]
+        recipe = {"mix": mix, "speed": body.speed, "pitch": body.pitch}
+    else:
+        raise HTTPException(400, "unknown voice")
+    if body.voice == "narrator":
+        recipe = {**recipe, "speed": body.speed, "pitch": body.pitch}
+    mp3 = await asyncio.to_thread(voices.render, [(body.text.strip(), recipe)])
+    return Response(mp3, media_type="audio/mpeg", headers={"Cache-Control": "no-store"})
+
+
 @router.get("/files/voice/{name}")
 def get_voice(name: str):
     from .game.voices import AUDIO_DIR

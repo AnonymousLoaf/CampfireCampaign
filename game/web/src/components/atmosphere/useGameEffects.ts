@@ -27,8 +27,8 @@ function sidesOf(notation?: string): number {
  */
 export function useGameEffects(view: GameView, opts: { tv?: boolean } = {}) {
   const seen = useRef<{ game: string; ids: Set<string>; maxNum: number } | null>(null);
-  // new narrations waiting for the server's voiced audio: id → (text, fallback timer)
-  const waiting = useRef(new Map<string, { text: string; timer: number }>());
+  // new narrations waiting for the host PC's voiced audio: id → give-up timer
+  const waiting = useRef(new Map<string, { timer: number }>());
   useEffect(() => {
     if (!waiting.current.size) return;
     for (const e of view.log) {
@@ -37,7 +37,7 @@ export function useGameEffects(view: GameView, opts: { tv?: boolean } = {}) {
       if (w && audio) {
         window.clearTimeout(w.timer);
         waiting.current.delete(String(e.id));
-        enqueue(String(e.id), w.text, audio);
+        enqueue(String(e.id), audio);
       }
     }
   }, [view.log]);
@@ -181,13 +181,11 @@ export function useGameEffects(view: GameView, opts: { tv?: boolean } = {}) {
           if ((opts.tv ? prefs.tvAutoRead : prefs.autoRead) && e.text.trim()) {
             const id = String(e.id);
             const audio = (e.data as { audio?: string } | null)?.audio;
-            if (audio || view.game.settings.voices === false) enqueue(id, e.text, audio);
-            else {
-              // the host PC voices it in a few seconds; if it doesn't, use this browser's voice
-              const timer = window.setTimeout(() => {
-                if (waiting.current.delete(id)) enqueue(id, e.text);
-              }, 15000);
-              waiting.current.set(id, { text: e.text, timer });
+            if (audio) enqueue(id, audio);
+            else if (view.game.settings.voices !== false) {
+              // the host PC voices it in a few seconds; past a minute it's old news, so it isn't read
+              const timer = window.setTimeout(() => waiting.current.delete(id), 60000);
+              waiting.current.set(id, { timer });
             }
           }
           break;

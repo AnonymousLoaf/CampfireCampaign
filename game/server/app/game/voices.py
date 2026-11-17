@@ -229,7 +229,7 @@ def to_mp3(samples: np.ndarray) -> bytes:
     enc.set_in_sample_rate(SR)
     enc.set_channels(1)
     enc.set_quality(2)
-    return enc.encode(pcm) + enc.flush()
+    return bytes(enc.encode(pcm) + enc.flush())
 
 
 def render(parts: list[tuple[str, dict]]) -> bytes:

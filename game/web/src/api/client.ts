@@ -88,6 +88,12 @@ export const api = {
   removeApiKey: () => del<Me>("/me/api-key"),
   setXaiKey: (key: string) => put<Me>("/me/xai-key", { key }),
   removeXaiKey: () => del<Me>("/me/xai-key"),
+  voices: () => get<{ available: boolean; voices: string[] }>("/voices"),
+  testVoice: async (body: { text: string; voice: string; blend?: string | null; blend_weight?: number; speed: number; pitch: number }) => {
+    const r = await fetch("/api/voices/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), credentials: "include" });
+    if (!r.ok) throw new Error((await r.json().catch(() => null))?.detail ?? `the server said ${r.status}`);
+    return r.blob();
+  },
   clientLog: (kind: string, message: string) => post<Ok>("/client-log", { kind, message: message.slice(0, 500) }),
   generatePortrait: (characterId: string, notes: string) =>
     post<CharacterView>(`/characters/${characterId}/portrait/generate`, { notes }),

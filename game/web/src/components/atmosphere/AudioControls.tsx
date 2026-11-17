@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { usePrefs } from "../../util/prefs";
 import { disableSound, isUnlocked, onUnlockChange, play, soundSupported, unlock } from "../../util/sound";
-import { canSpeak, speak, stopSpeaking, ttsSupported, useSpeakingId, useVoices } from "../../util/tts";
+import { canSpeak, speak, stopSpeaking, useSpeakingId } from "../../util/tts";
 
 export function useSoundUnlocked(): boolean {
   const [on, setOn] = useState(isUnlocked());
@@ -10,10 +10,9 @@ export function useSoundUnlocked(): boolean {
 }
 
 /** Speaker button on a narration: read it aloud / stop. */
-export function SpeakButton({ id, text, audio }: { id: string; text: string; audio?: string | null }) {
+export function SpeakButton({ id, audio }: { id: string; audio?: string | null }) {
   const speaking = useSpeakingId();
-  if (!audio && !ttsSupported()) return null;
-  if (!canSpeak()) return null;
+  if (!audio || !canSpeak()) return null; // only narrations the host PC has voiced
   const on = speaking === id;
   return (
     <button
@@ -23,7 +22,7 @@ export function SpeakButton({ id, text, audio }: { id: string; text: string; aud
       onClick={(e) => {
         e.stopPropagation();
         if (on) stopSpeaking();
-        else speak(id, text, audio);
+        else speak(id, audio);
       }}
     >
       {on ? "⏹" : "🔈"}
@@ -68,7 +67,7 @@ export function SoundChip({ tv = false, compact = false }: { tv?: boolean; compa
 /** Big "Read the story aloud" toggle for the TV view. */
 export function AutoReadToggle({ tv = false, compact = false }: { tv?: boolean; compact?: boolean }) {
   const [prefs, set] = usePrefs();
-  if (!ttsSupported()) return null;
+  if (!canSpeak()) return null;
   const on = tv ? prefs.tvAutoRead : prefs.autoRead;
   return (
     <button
@@ -89,9 +88,8 @@ export function AutoReadToggle({ tv = false, compact = false }: { tv?: boolean; 
 /** Per-device audio + narration settings. */
 export function AudioSettings({ compact = false, tv = false }: { compact?: boolean; tv?: boolean }) {
   const [p, set] = usePrefs();
-  const voices = useVoices();
   const unlocked = useSoundUnlocked();
-  const tts = ttsSupported();
+  const tts = canSpeak();
   return (
     <div className={`audio-settings ${compact ? "compact" : ""}`}>
       {soundSupported() && (
@@ -146,29 +144,14 @@ export function AudioSettings({ compact = false, tv = false }: { compact?: boole
             <span>Auto-read new narration{tv ? " (TV)" : ""}</span>
           </label>
           <label className="row gap center">
-            <span className="audio-label">Voice</span>
-            <select className="grow" value={p.voice} onChange={(e) => set({ voice: e.target.value })}>
-              <option value="">Browser default</option>
-              {voices.map((v) => (
-                <option key={v.voiceURI} value={v.voiceURI}>
-                  {v.name} ({v.lang})
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="row gap center">
             <span className="audio-label">Speed</span>
             <input type="range" min={0.6} max={1.6} step={0.05} value={p.rate} onChange={(e) => set({ rate: Number(e.target.value) })} className="grow" />
             <span className="muted small">{p.rate.toFixed(2)}×</span>
           </label>
-          <div>
-            <button className="btn tiny ghost" onClick={() => speak("voice-test", "The torchlight gutters as the door groans open. What do you do?")}>
-              ▶ Test voice
-            </button>
-          </div>
+          <div className="muted small">Narration is read in the character voices the host PC makes (try them under Test voices).</div>
         </>
       ) : (
-        <div className="muted small">This browser can't read text aloud.</div>
+        <div className="muted small">This browser can't play audio.</div>
       )}
       {!compact && <div className="muted small">These settings are saved on this device only.</div>}
     </div>
