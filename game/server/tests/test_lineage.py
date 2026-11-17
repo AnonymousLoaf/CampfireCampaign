@@ -68,3 +68,9 @@ def test_ddb_import_brings_magic_initiate_spells():
     v = ch.view("x", "u", None, s)
     assert "Magic Initiate" in s["feats"] and s["mi_ability"] == "CHA"
     assert {"True Strike", "Poison Spray"} <= set(_names(v, "cantrips")) and "Disguise Self" in _names(v, "spells")
+
+
+def test_ddb_import_keeps_the_backstory():
+    d = _ddb_json(legacy=False)
+    d["notes"] = {"backstory": "<p>Raised by <strong>reapers</strong> in the barley fields.</p>"}
+    assert ddb.to_sheet(d)["backstory"] == "Raised by reapers in the barley fields."

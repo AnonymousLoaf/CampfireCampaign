@@ -196,7 +196,7 @@ def to_sheet(d: dict) -> dict:
 
     sheet: dict = {
         "ruleset": ruleset, "name": rep["name"][:40], "race": race_key, "subrace": sub_key, "class": cls_key,
-        "subclass": sub_index or sub_name, "background": bg_key, "alignment": "True Neutral", "backstory": "",
+        "subclass": sub_index or sub_name, "background": bg_key, "alignment": "True Neutral", "backstory": _text((d.get("notes") or {}).get("backstory"))[:4000],
         "color": "#5b8fd1", "level": 1, "xp": 0, "level_target": 1, "abilities": scores, "base_abilities": dict(scores),
         "bonus_abilities": [], "ancestry": None, "feats": [], "masteries": [], "exhaustion": 0,
         "skill_profs": sorted(profs), "expertise": sorted(expertise), "save_profs": list(cls["saves"]),
