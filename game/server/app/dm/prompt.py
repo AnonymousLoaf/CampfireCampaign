@@ -177,6 +177,8 @@ def turn_message(ctx: Ctx, reason: str, body: str, recent: list[tuple[str, str |
                    f"{hexmap.BIOME_NAMES[hexmap.biome_at(ctx.world, p['q'], p['r'])]}.")
     if st.get("scene_map"):
         out.append(scenemap.describe(st["scene_map"], ctx.party()))
+        out.append("Keep this map true to your narration: if anyone moves, call update_scene_map; if the party "
+                   "leaves this area, draw the new one (or clear_scene_map) before you narrate.")
     elif not ctx.encounter:
         out.append("No scene map is drawn. If the party is somewhere its layout matters (a street, a room, a fork, a "
                    "climb), draw one with draw_scene_map this turn so the players can see where they stand.")
