@@ -6,14 +6,15 @@ their characters can see: line of sight from each character, within the light's 
 stays on the map, dimmed, without the people in it. The full map never leaves the server.
 
 Cells: '#' wall / cliff / building, '.' floor or open ground, 'D' door or gate (blocks sight), 'T' obstacle,
-'~' difficult terrain, ' ' void (nothing there, e.g. a drop).
+'~' difficult terrain, '=' ladder / rungs / rope / narrow bridge, ' ' void (open air, a drop, a pit).
+In the players' view a seen void square is sent as 'v' (drawn as open air) and an unseen one as ' ' (fog).
 """
 from __future__ import annotations
 
 from . import battlemap as bm
 
 MAX_W, MAX_H = 32, 24
-CELLS = set("#.DT~ ")
+CELLS = set("#.DT~= ")
 SIGHT_BLOCKING = set("#D")
 NPC_MAX, FEATURE_MAX = 16, 20
 
@@ -86,7 +87,7 @@ def update(sm: dict, party_at=None, npcs=None, add_features=None, remove_feature
         x, y = _xy(c, sm)
         ch = str(c.get("cell", "."))[:1] or "."
         if ch not in CELLS:
-            raise ValueError(f"unknown cell {ch!r}; use one of # . D T ~ or space")
+            raise ValueError(f"unknown cell {ch!r}; use one of # . D T ~ = or space")
         row = sm["cells"][y]
         sm["cells"][y] = row[:x] + ch + row[x + 1:]
     if party_at:
@@ -106,7 +107,7 @@ def update(sm: dict, party_at=None, npcs=None, add_features=None, remove_feature
 def _passable_near(sm: dict, x: int, y: int) -> tuple[int, int]:
     if sm["cells"][y][x] not in "# T":
         return x, y
-    best = min(((cx, cy) for cy in range(sm["h"]) for cx in range(sm["w"]) if sm["cells"][cy][cx] in ".~D"),
+    best = min(((cx, cy) for cy in range(sm["h"]) for cx in range(sm["w"]) if sm["cells"][cy][cx] in ".~D="),
                key=lambda p: bm.distance_ft(p, (x, y)), default=(x, y))
     return best
 
@@ -120,7 +121,7 @@ def place_party(sm: dict, char_ids: list[str]) -> dict[str, tuple[int, int]]:
             out[cid] = tuple(sm["positions"][cid])
             taken.add(out[cid])
     px, py = sm["party"]
-    spots = sorted(((x, y) for y in range(sm["h"]) for x in range(sm["w"]) if sm["cells"][y][x] in ".~D"),
+    spots = sorted(((x, y) for y in range(sm["h"]) for x in range(sm["w"]) if sm["cells"][y][x] in ".~D="),
                    key=lambda p: (bm.distance_ft(p, (px, py)), abs(p[0] - px) + abs(p[1] - py)))
     for cid in char_ids:
         if cid in out:
@@ -191,7 +192,13 @@ def view(sm: dict, party: list[tuple[str, dict]], viewer_char: str | None) -> di
     def known(x: int, y: int) -> bool:
         return (x, y) in vis or (len(seen) == w * sm["h"] and seen[y * w + x] == "1")
 
-    cells = ["".join(sm["cells"][y][x] if known(x, y) else " " for x in range(w)) for y in range(sm["h"])]
+    def shown(x: int, y: int) -> str:
+        if not known(x, y):
+            return " "
+        c = sm["cells"][y][x]
+        return "v" if c == " " else c
+
+    cells = ["".join(shown(x, y) for x in range(w)) for y in range(sm["h"])]
     dim = [[x, y] for y in range(sm["h"]) for x in range(w) if known(x, y) and (x, y) not in vis]
     tokens = []
     for cid, s in party:

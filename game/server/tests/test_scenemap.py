@@ -96,3 +96,14 @@ def test_dm_tools_and_game_view_hide_the_full_map():
         sm = host.get(f"/api/games/{gid}/view").json()["scene_map"]
         assert sm["title"] == "The fork" and sm["cells"][1][1] == " " and not sm["labels"]
         assert [t["name"] for t in sm["tokens"]] == ["Ash"]
+
+
+def test_open_air_is_not_fog_and_ladders_are_walkable():
+    shaft = ["#=  #", "#=  #", "#=  #", "#....", "#####"]
+    sm = scenemap.draw("cave", shaft, {"x": 1, "y": 0}, sight_ft=10)
+    assert sm["party"] == (1, 0)  # a ladder square is somewhere you can stand
+    scenemap.refresh(sm, ["a"])
+    v = scenemap.view(sm, PARTY[:1], "a")
+    assert v["cells"][0][2] == "v"  # the drop beside the rungs: seen, open air
+    assert v["cells"][3][4] == " "  # out of a 10 ft light: unseen fog
+    assert v["cells"][1][1] == "="
