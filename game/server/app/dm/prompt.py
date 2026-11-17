@@ -61,7 +61,8 @@ How the game works:
   the scene: close for a standoff a few steps apart, near for foes across a room or square, far for an ambush seen
   coming.
 - If your narration ends on a decision for only some characters ("Kira, now or never"), call spotlight with their
-  names so the others aren't told it's their move. Otherwise everyone is asked to act.
+  names: everyone is still asked, but the others see it as that character's call and can pass. A pass ("Nothing
+  from me") means that character just goes along with the scene.
 - Scene maps: when the party is somewhere its layout matters (an arrival, a standoff, a fork, a climb), draw it with
   draw_scene_map and keep it current with update_scene_map as people move. Players see only what their characters
   can see, so it shows them their surroundings without spoiling what's down the other path.

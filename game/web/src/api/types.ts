@@ -529,6 +529,8 @@ export interface GameSummary {
   phase_type: PhaseType | null;
   deadline: string | null;
   my_turn: boolean;
+  /** When the round is someone else's call: their character names (I can still act, or pass). */
+  their_call?: string[];
   player_count: number;
   max_players: number;
   host_name: string;
@@ -571,6 +573,8 @@ export interface Phase {
   waiting_on: string[];
   /** Exploration: names of the characters the DM asked (only their players are waited on). */
   spotlight?: string[];
+  /** Names the DM's question is for, when it's not my character (I'm still asked; I can pass). */
+  their_call?: string[];
   my_submission: null | { text: string; travel_to: TravelTo; rest?: RestKind; edited?: boolean; updated_at?: string };
   submissions_visible: {
     user_id: string;

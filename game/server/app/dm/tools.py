@@ -208,8 +208,8 @@ TOOLS: list[dict] = [
      "input_schema": {"type": "object", "properties": {}, "required": []}},
     {"name": "spotlight",
      "description": "Call when your narration ends on a question or decision for specific characters only (e.g. "
-                    "\"Kira, now or never\"). The next round then waits just for their players; everyone else may "
-                    "still act but isn't required to. Don't call it when the whole party should answer.",
+                    "\"Kira, now or never\"). Everyone is still asked to act, but the others see it as that "
+                    "character's call and can pass with one click. Don't call it when the whole party should answer.",
      "input_schema": {"type": "object", "properties": {
          "characters": {"type": "array", "items": {"type": "string"}, "minItems": 1,
                         "description": "Names of the player characters the decision is for"}},
@@ -250,7 +250,7 @@ class ToolBox:
         self.ended_combat = False
         self.opened_shop = False
         self.pending_rolls: list[dict] = []
-        self.spotlight: list[str] = []  # character ids the next exploration round waits on (empty = everyone)
+        self.spotlight: list[str] = []  # character ids the next exploration round's question is for (a label only)
         self.calls: list[str] = []
         self.ended_turn = False
         self.combat_steps = 0
@@ -681,7 +681,7 @@ class ToolBox:
         ids = [self._char(n)[0] for n in characters[:6]]
         self.spotlight = list(dict.fromkeys(self.spotlight + ids))
         names = ", ".join(self.ctx.chars[c]["name"] for c in self.spotlight)
-        return f"ok: the next round waits only for {names}; others may still act"
+        return f"ok: the next round is {names}'s call; the others can still act or pass"
 
     def t_rest(self, kind: str) -> str:
         return rest_party(self.ctx, kind)

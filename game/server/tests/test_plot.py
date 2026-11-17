@@ -75,7 +75,7 @@ def test_host_picks_plot_and_only_dm_and_host_see_it():
         assert host.get(f"/api/games/{gid}/view").json()["plot"]["name"] == "Renamed"
 
 
-def test_spotlight_waits_only_for_the_named_character():
+def test_spotlight_labels_the_round_but_still_asks_everyone():
     from app.dm.tools import ToolBox
     with TestClient(app):
         host, player = _client("spothost"), _client("spotplayer")
@@ -91,13 +91,15 @@ def test_spotlight_waits_only_for_the_named_character():
             tb = ToolBox(ctx)
             assert "Bryn" in tb.call("spotlight", {"characters": ["bryn"]})
             ctx.phase["spotlight"] = tb.spotlight
-            bryn_uid = next(m.user_id for m in ctx.members if m.role == "player")
-            assert ctx.waiting_on() == [bryn_uid]
+            assert len(ctx.waiting_on()) == 2  # everyone is still asked
             ctx.save()
             db.commit()
         finally:
             db.close()
         hv = host.get(f"/api/games/{gid}/view").json()
-        assert hv["phase"]["spotlight"] == ["Bryn"] and hv["phase"]["waiting_on"] == [bryn_uid]
-        assert [g["my_turn"] for g in host.get("/api/games").json() if g["id"] == gid] == [False]
-        assert [g["my_turn"] for g in player.get("/api/games").json() if g["id"] == gid] == [True]
+        assert hv["phase"]["their_call"] == ["Bryn"]
+        assert player.get(f"/api/games/{gid}/view").json()["phase"]["their_call"] == []
+        hg = next(g for g in host.get("/api/games").json() if g["id"] == gid)
+        assert hg["my_turn"] and hg["their_call"] == ["Bryn"]
+        pg = next(g for g in player.get("/api/games").json() if g["id"] == gid)
+        assert pg["my_turn"] and pg["their_call"] == []

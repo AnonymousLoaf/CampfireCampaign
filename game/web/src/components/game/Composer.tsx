@@ -63,9 +63,22 @@ export function ExplorationComposer() {
       {view.phase.prompt && <div className="dm-prompt">{view.phase.prompt}</div>}
       <Others />
       {single && <div className="speaker-note">🗣 Acting for the whole party</div>}
-      {!single && !!view.phase.spotlight?.length && view.me.user_id && !view.phase.waiting_on.includes(view.me.user_id) && !mine && (
-        <div className="speaker-note">
-          🎯 The DM is waiting on {view.phase.spotlight.join(" and ")}. You can still add an action if you like.
+      {!!view.phase.their_call?.length && !mine && (
+        <div className="speaker-note row gap center wrap">
+          <span>
+            🎯 This one is {view.phase.their_call.join(" and ")}&apos;s call. Add something if you like, or pass.
+          </span>
+          <button
+            className="btn small"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              await run(() => api.submitAction(gameId, `Nothing from me. I'll follow ${view.phase.their_call!.join(" and ")}'s lead.`, null, null));
+              setBusy(false);
+            }}
+          >
+            Nothing from me
+          </button>
         </div>
       )}
       <div className="quick-chips">

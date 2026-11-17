@@ -580,6 +580,7 @@ def my_games(u: User = Depends(current_user), db: Session = Depends(get_db)):
         host = db.get(User, g.host_id)
         out.append({"id": g.id, "name": g.name, "status": g.status, "phase_type": ctx.phase.get("type"),
                     "deadline": ctx.phase.get("deadline"), "my_turn": u.id in ctx.waiting_on(),
+                    "their_call": ctx.their_call(u.id),
                     "player_count": len([m for m in ctx.members if m.role != "spectator"]),
                     "max_players": ctx.settings.get("max_players", 4), "ruleset": ctx.settings.get("ruleset", "2014"),
                     "role": next((m.role for m in ctx.members if m.user_id == u.id), None),
