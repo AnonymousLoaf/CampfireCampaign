@@ -165,7 +165,9 @@ TOOLS: list[dict] = [
                     "there, including what lies down the passages they haven't taken. One square is 5 ft. Cells: "
                     "'#' wall/cliff/building, '.' floor or open ground, 'D' door or gate (blocks sight), 'T' "
                     "obstacle (tree, statue, cart, rubble pile: name important ones with features), '~' difficult "
-                    "terrain (mud, shallow water, bone-slick), ' ' empty void (a drop, a pit, the sky).",
+                    "terrain (mud, shallow water, bone-slick), '=' ladder, rungs, rope or narrow bridge, ' ' open "
+                    "air (a drop, a pit, the sky). For a climb, draw a side view: '=' for the rungs, ' ' for the "
+                    "drop beside them.",
      "input_schema": {"type": "object", "properties": {
          "title": {"type": "string", "description": "Short name, e.g. 'The Throat: first fork'"},
          "terrain": {"type": "string", "enum": ["road", "forest", "tavern", "cave", "dungeon", "ruins", "camp", "swamp", "town"],

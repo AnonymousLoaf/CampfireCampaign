@@ -100,9 +100,22 @@ export default function BattleMap({
   const [hover, setHover] = useState<{ x: number; y: number } | null>(null);
   const [inspect, setInspect] = useState<{ id: string; x: number; y: number } | null>(null);
   const { w, h } = encounter.grid;
-  const cell = Math.max(8, Math.floor(Math.min(size.w / w, size.h / h)));
-  const ox = Math.floor((size.w - cell * w) / 2);
-  const oy = Math.floor((size.h - cell * h) / 2);
+  // Pan & zoom: z multiplies the fit-to-screen square size; x/y shift the map in pixels.
+  const [vp, setVp] = useState({ z: 1, x: 0, y: 0 });
+  const fit = Math.max(8, Math.floor(Math.min(size.w / w, size.h / h)));
+  const cell = Math.max(4, Math.round(fit * vp.z));
+  const ox = Math.floor((size.w - cell * w) / 2) + vp.x;
+  const oy = Math.floor((size.h - cell * h) / 2) + vp.y;
+  // A different map (new scene, new fight) starts fitted again.
+  const mapKey = `${w}x${h}|${encounter.title ?? ""}|${encounter.terrain}`;
+  useEffect(() => setVp({ z: 1, x: 0, y: 0 }), [mapKey]);
+  const zoomAt = (mx: number, my: number, z: number) => {
+    const nz = Math.max(1, Math.min(5, z));
+    const nc = Math.max(4, Math.round(fit * nz));
+    const gx = (mx - ox) / cell;
+    const gy = (my - oy) / cell;
+    setVp({ z: nz, x: Math.round(mx - gx * nc - Math.floor((size.w - nc * w) / 2)), y: Math.round(my - gy * nc - Math.floor((size.h - nc * h) / 2)) });
+  };
   const style = TERRAIN_STYLE[encounter.terrain] ?? TERRAIN_STYLE.road;
 
   const propMap = useMemo(() => new Map((encounter.props ?? []).map((p) => [`${p.x},${p.y}`, p.kind])), [encounter.props]);
@@ -132,6 +145,23 @@ export default function BattleMap({
         const px = ox + x * cell;
         const py = oy + y * cell;
         if (c === " ") continue;
+        if (c === "v") {
+          // Scene maps: open air / a drop the party can see into (unlike blank fog).
+          const g = ctx.createLinearGradient(px, py, px, py + cell);
+          g.addColorStop(0, "#1b2230");
+          g.addColorStop(1, "#141a24");
+          ctx.fillStyle = g;
+          ctx.fillRect(px, py, cell, cell);
+          ctx.strokeStyle = "rgba(140,170,210,0.10)";
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(px + cell * 0.2, py + cell * 0.3);
+          ctx.lineTo(px + cell * 0.45, py + cell * 0.3);
+          ctx.moveTo(px + cell * 0.55, py + cell * 0.7);
+          ctx.lineTo(px + cell * 0.8, py + cell * 0.7);
+          ctx.stroke();
+          continue;
+        }
         ctx.fillStyle = (x + y) % 2 ? style.floor : style.floorAlt;
         ctx.fillRect(px, py, cell, cell);
         if (c !== "#") decorateFloor(ctx, encounter.terrain, px, py, cell, x, y);
@@ -158,6 +188,20 @@ export default function BattleMap({
         } else if (c === "D") {
           ctx.fillStyle = "#9a6b3a";
           ctx.fillRect(px + cell * 0.1, py + cell * 0.35, cell * 0.8, cell * 0.3);
+        } else if (c === "=") {
+          // Ladder, rungs, rope or narrow bridge: two rails and three rungs.
+          ctx.strokeStyle = "#c8b48a";
+          ctx.lineWidth = Math.max(1, cell * 0.07);
+          ctx.beginPath();
+          ctx.moveTo(px + cell * 0.25, py);
+          ctx.lineTo(px + cell * 0.25, py + cell);
+          ctx.moveTo(px + cell * 0.75, py);
+          ctx.lineTo(px + cell * 0.75, py + cell);
+          for (const f of [0.2, 0.5, 0.8]) {
+            ctx.moveTo(px + cell * 0.25, py + cell * f);
+            ctx.lineTo(px + cell * 0.75, py + cell * f);
+          }
+          ctx.stroke();
         }
         ctx.strokeStyle = style.grid;
         ctx.lineWidth = 1;
@@ -183,7 +227,7 @@ export default function BattleMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [encounter, size, cell, ox, oy, w, h, style, propMap, actorTokenId, inspect?.id, hover, canvasRef, portraits, imgTick]);
 
-  const squareAt = (e: React.MouseEvent) => {
+  const squareAt = (e: { clientX: number; clientY: number }) => {
     const rect = canvasRef.current!.getBoundingClientRect();
     const x = Math.floor((e.clientX - rect.left - ox) / cell);
     const y = Math.floor((e.clientY - rect.top - oy) / cell);
@@ -192,7 +236,7 @@ export default function BattleMap({
   };
 
   // Clicking a creature shows what you could know about it. Nothing on the map acts: you type what you do.
-  const onClick = (e: React.MouseEvent) => {
+  const onClick = (e: { clientX: number; clientY: number }) => {
     if (!interactive) return;
     const sq = squareAt(e);
     if (!sq) return;
@@ -205,6 +249,55 @@ export default function BattleMap({
     } else {
       setInspect(null);
     }
+  };
+
+  // Drag to move the map, wheel / pinch / buttons to zoom. A press that doesn't move is a click.
+  const drag = useRef<{ sx: number; sy: number; vx: number; vy: number; moved: boolean } | null>(null);
+  const touch = useRef<
+    | null
+    | { mode: "pan"; sx: number; sy: number; vx: number; vy: number; moved: boolean }
+    | { mode: "pinch"; d0: number; z0: number; mx: number; my: number }
+  >(null);
+  const lastTouch = useRef(0);
+  const fromTouch = () => Date.now() - lastTouch.current < 700;
+  const local = (cx: number, cy: number) => {
+    const rect = canvasRef.current!.getBoundingClientRect();
+    return { x: cx - rect.left, y: cy - rect.top };
+  };
+  const onTouchStart = (e: React.TouchEvent) => {
+    lastTouch.current = Date.now();
+    if (e.touches.length === 1) {
+      const t = e.touches[0];
+      touch.current = { mode: "pan", sx: t.clientX, sy: t.clientY, vx: vp.x, vy: vp.y, moved: false };
+    } else if (e.touches.length === 2) {
+      const [a, b] = [e.touches[0], e.touches[1]];
+      const m = local((a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2);
+      touch.current = { mode: "pinch", d0: Math.max(1, Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)), z0: vp.z, mx: m.x, my: m.y };
+    }
+  };
+  const onTouchMove = (e: React.TouchEvent) => {
+    const t0 = touch.current;
+    lastTouch.current = Date.now();
+    if (!t0) return;
+    if (t0.mode === "pan" && e.touches.length === 1) {
+      const t = e.touches[0];
+      const dx = t.clientX - t0.sx;
+      const dy = t.clientY - t0.sy;
+      if (Math.abs(dx) + Math.abs(dy) > 6) t0.moved = true;
+      if (t0.moved) setVp((v) => ({ ...v, x: t0.vx + dx, y: t0.vy + dy }));
+    } else if (t0.mode === "pinch" && e.touches.length === 2) {
+      const [a, b] = [e.touches[0], e.touches[1]];
+      zoomAt(t0.mx, t0.my, t0.z0 * (Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) / t0.d0));
+    }
+  };
+  const onTouchEnd = (e: React.TouchEvent) => {
+    const t0 = touch.current;
+    lastTouch.current = Date.now();
+    if (t0?.mode === "pan" && !t0.moved && e.changedTouches.length === 1) onClick(e.changedTouches[0]);
+    if (e.touches.length === 1) {
+      const t = e.touches[0];
+      touch.current = { mode: "pan", sx: t.clientX, sy: t.clientY, vx: vp.x, vy: vp.y, moved: true };
+    } else if (e.touches.length === 0) touch.current = null;
   };
 
   const hoverTok = hover ? encounter.tokens.find((t) => t.x === hover.x && t.y === hover.y) : undefined;
@@ -225,16 +318,58 @@ export default function BattleMap({
     <div className="map-wrap" ref={wrapRef}>
       <canvas
         ref={canvasRef}
-        onClick={onClick}
+        onMouseDown={(e) => {
+          if (fromTouch()) return;
+          drag.current = { sx: e.clientX, sy: e.clientY, vx: vp.x, vy: vp.y, moved: false };
+        }}
+        onMouseUp={(e) => {
+          const d = drag.current;
+          drag.current = null;
+          if (d && !d.moved && !fromTouch()) onClick(e);
+        }}
         onMouseMove={(e) => {
+          const d = drag.current;
+          if (d) {
+            const dx = e.clientX - d.sx;
+            const dy = e.clientY - d.sy;
+            if (Math.abs(dx) + Math.abs(dy) > 4) d.moved = true;
+            if (d.moved) {
+              setVp((v) => ({ ...v, x: d.vx + dx, y: d.vy + dy }));
+              return;
+            }
+          }
           if (!interactive) return;
           const sq = squareAt(e);
           if (!sq) setHover(null);
           else if (!hover || hover.x !== sq.x || hover.y !== sq.y) setHover(sq);
         }}
-        onMouseLeave={() => setHover(null)}
-        style={{ cursor: interactive && hoverTok && hoverTok.hp_state !== "dead" ? "pointer" : "default", touchAction: "manipulation" }}
+        onMouseLeave={() => {
+          drag.current = null;
+          setHover(null);
+        }}
+        onWheel={(e) => {
+          const m = local(e.clientX, e.clientY);
+          zoomAt(m.x, m.y, vp.z * (e.deltaY < 0 ? 1.15 : 1 / 1.15));
+        }}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+        style={{
+          cursor: drag.current?.moved ? "grabbing" : interactive && hoverTok && hoverTok.hp_state !== "dead" ? "pointer" : "grab",
+          touchAction: "none",
+        }}
       />
+      <div className="map-overlay bottom-right">
+        <button className="icon-btn" title="Zoom in" onClick={() => zoomAt(size.w / 2, size.h / 2, vp.z * 1.25)}>
+          ＋
+        </button>
+        <button className="icon-btn" title="Zoom out" onClick={() => zoomAt(size.w / 2, size.h / 2, vp.z / 1.25)}>
+          －
+        </button>
+        <button className="icon-btn" title="Fit the whole map" disabled={vp.z === 1 && !vp.x && !vp.y} onClick={() => setVp({ z: 1, x: 0, y: 0 })}>
+          ⤢
+        </button>
+      </div>
       {(encounter.labels ?? []).map((l) => (
         <span
           key={`${l.x},${l.y},${l.label}`}
