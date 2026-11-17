@@ -346,6 +346,9 @@ def build_view(db: Session, ctx: Ctx, uid: str | None, tv: bool = False) -> dict
                "controls": controls, "role": my_member.role if my_member else None,
                "last_seen_id": last_seen, "unseen_count": unseen,
                "last_chat_seen_id": my_member.last_chat_seen_id if my_member else None, "chat_unseen": chat_unseen},
+        "plot": ({"name": ctx.state["plot"].get("name"), "entry_id": ctx.state["plot"].get("entry_id")}
+                 if is_host and ctx.state.get("plot") else None),  # the plot itself stays DM-only
+        "has_plot": bool(ctx.state.get("plot")),
         "tv_url": f"/#/tv/{tv_token}" if (is_host and tv_token) else None,
         "members": members,
         "characters": chars,

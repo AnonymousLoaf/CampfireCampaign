@@ -34,8 +34,8 @@ export default function CustomPicker({
     }
   };
 
-  // homebrew races are picked in the character creator, not attached afterwards
-  const available = (lib ?? []).filter((e) => !attached.has(e.id) && e.kind !== "race");
+  // homebrew races are picked in the character creator and plots by a game's host, not attached to a character
+  const available = (lib ?? []).filter((e) => !attached.has(e.id) && e.kind !== "race" && e.kind !== "plot");
 
   return (
     <div className="custom-picker">

@@ -1,6 +1,6 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { api } from "../../api/client";
-import { DEFAULT_SETTINGS, type CharacterView, type GameSettings, type Meta } from "../../api/types";
+import { DEFAULT_SETTINGS, type CharacterView, type CustomEntry, type GameSettings, type Meta } from "../../api/types";
 import Modal from "../Modal";
 import ErrorText, { useAction } from "../ErrorText";
 import CharacterPicker from "./CharacterPicker";
@@ -216,10 +216,18 @@ export default function CreateGameModal({
     dm_model: meta.models[0]?.id ?? DEFAULT_SETTINGS.dm_model,
   });
   const [charId, setCharId] = useState(characters.find((c) => (c.ruleset ?? "2014") === "2014")?.id ?? "");
+  const [plots, setPlots] = useState<CustomEntry[]>([]);
+  const [plotId, setPlotId] = useState("");
+  useEffect(() => {
+    api
+      .customList()
+      .then((l) => setPlots(l.filter((e) => e.kind === "plot")))
+      .catch(() => setPlots([]));
+  }, []);
   const set = <K extends keyof GameSettings>(k: K, v: GameSettings[K]) => setS((prev) => ({ ...prev, [k]: v }));
 
   const [create, busy, error] = useAction(async () => {
-    const res = await api.createGame(name.trim() || "Untitled campaign", { ...s, discord_webhook: s.discord_webhook?.trim() || null }, charId);
+    const res = await api.createGame(name.trim() || "Untitled campaign", { ...s, discord_webhook: s.discord_webhook?.trim() || null }, charId, plotId);
     onCreated(res.id);
   });
 
@@ -262,6 +270,23 @@ export default function CreateGameModal({
           </Field>
           <Field label="Length">
             <Seg options={LENGTH} value={s.length} onChange={(v) => set("length", v)} />
+          </Field>
+          <Field label="Campaign plot">
+            {plots.length ? (
+              <select value={plotId} onChange={(e) => setPlotId(e.target.value)}>
+                <option value="">None: the DM invents the story</option>
+                {plots.map((pl) => (
+                  <option key={pl.id} value={pl.id}>
+                    {pl.name}
+                  </option>
+                ))}
+              </select>
+            ) : null}
+            <div className="muted small hint">
+              {plots.length
+                ? "Your outline steers the DM. Players never see it."
+                : "Write your own story outline (villain, beats, secrets, twists) under My content → New entry → Campaign plot, and the DM will follow it."}
+            </div>
           </Field>
         </fieldset>
 
