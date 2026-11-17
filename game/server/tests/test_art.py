@@ -86,8 +86,13 @@ def test_generate_a_character_portrait(monkeypatch):
         c.put("/api/me/xai-key", json={"key": FAKE_KEY})
         r = c.post(f"/api/characters/{cid}/portrait/generate", json={"notes": "bronze scales, scarred snout"})
         assert r.status_code == 200, r.text
-        assert r.json()["portrait_url"] and "bronze scales" in calls[-1][0] and "Teft" in calls[-1][0]
+        assert r.json()["portrait_url"] and "Also: bronze scales" in calls[-1][0] and "Teft" in calls[-1][0]
         assert c.get(r.json()["portrait_url"]).status_code == 200
+        # nothing typed: painted from the sheet alone (race, class, gear)
+        r = c.post(f"/api/characters/{cid}/portrait/generate", json={})
+        assert r.status_code == 200, r.text
+        prompt = calls[-1][0]
+        assert "Fighter" in prompt and "Wearing and carrying:" in prompt and "Also:" not in prompt
 
 
 def test_paid_pictures_are_counted_outside_the_game_state(monkeypatch):

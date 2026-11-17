@@ -153,13 +153,27 @@ def portrait_for(name: str, by_name: dict[str, str]) -> str | None:
     return None
 
 
-def character_prompt(sheet: dict, race: str, cls: str, notes: str = "") -> str:
-    looks = notes.strip() or (sheet.get("appearance") or "").strip()
-    back = (sheet.get("backstory") or "").strip()[:300]
-    return (f"Character portrait of {sheet.get('name', 'an adventurer')}, a {race} {cls} adventurer, head and "
-            "shoulders, facing the viewer, heroic. "
-            + (f"Appearance: {looks[:400]}. " if looks else "")
-            + (f"Background: {back}. " if back and not looks else "")
+def character_prompt(sheet: dict, v: dict, notes: str = "") -> str:
+    """A portrait prompt from the character sheet itself (`v` is its view); `notes` adds anything the player wants."""
+    race = v.get("race") or ""
+    if v.get("subrace"):
+        race = f"{race} ({v['subrace']})"
+    anc = (sheet.get("ancestry") or {}).get("name") if isinstance(sheet.get("ancestry"), dict) else None
+    cls = v.get("class") or "adventurer"
+    if v.get("subclass"):
+        cls = f"{cls} ({v['subclass']})"
+    lvl = int(v.get("level") or 1)
+    seasoned = "a fresh-faced" if lvl <= 2 else "a seasoned" if lvl <= 8 else "a legendary"
+    gear = [i["name"] for i in v.get("inventory") or [] if i.get("equipped")][:5]
+    back = (v.get("backstory") or "").strip()[:400]
+    extra = notes.strip()[:600]
+    return (f"Character portrait of {v.get('name') or 'an adventurer'}, {seasoned} {race} {cls} adventurer"
+            + (f" with {anc.lower()} dragon ancestry" if anc else "") + ", head and shoulders, facing the viewer. "
+            + (f"Background: {v['background']}. " if v.get("background") else "")
+            + (f"Temperament: {v['alignment']}. " if v.get("alignment") else "")
+            + (f"Wearing and carrying: {', '.join(gear)}. " if gear else "")
+            + (f"Their story: {back}. " if back else "")
+            + (f"Also: {extra}. " if extra else "")
             + STYLE)
 
 

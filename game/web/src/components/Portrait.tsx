@@ -221,12 +221,13 @@ export function PortraitEditor({
       </div>
       {generate && painting !== null && (
         <div className="paint-portrait">
+          <div className="muted small">Painted from the character sheet: race, class, background, gear and story.</div>
           <textarea
             rows={2}
             maxLength={600}
             autoFocus
             value={painting}
-            placeholder="What do they look like? e.g. bronze scales, a scarred snout, battered plate armour"
+            placeholder="Optional: anything to add, e.g. a scar over one eye, a red cloak"
             onChange={(e) => setPainting(e.target.value)}
           />
           <div className="row gap">
@@ -234,7 +235,7 @@ export function PortraitEditor({
               Cancel
             </button>
             <button className="btn tiny primary" disabled={busy} onClick={() => void paint()}>
-              {busy ? "Painting… (about 10 s)" : "Paint portrait (about $0.02)"}
+              {busy ? "Painting… (about 10 s)" : "Paint portrait"}
             </button>
           </div>
         </div>
