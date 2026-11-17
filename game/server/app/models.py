@@ -36,6 +36,7 @@ class User(Base):
     notify_email: Mapped[bool] = mapped_column(Boolean, default=False)
     notify_push: Mapped[bool] = mapped_column(Boolean, default=True)
     remind_minutes: Mapped[int] = mapped_column(Integer, default=60)
+    notify_chat: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -117,6 +118,21 @@ class Membership(Base):
     away_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_seen_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     reminded_phase_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_chat_seen_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class ChatMessage(Base):
+    """Out-of-character table talk between the people in a game. Kept apart from the story log on purpose:
+    the DM never reads it, so players can plan without the monsters overhearing."""
+    __tablename__ = "chat_messages"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    game_id: Mapped[str] = mapped_column(ForeignKey("games.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    author: Mapped[str] = mapped_column(String)  # display name when sent, kept if the sender leaves
+    text: Mapped[str] = mapped_column(Text)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class LogEntry(Base):

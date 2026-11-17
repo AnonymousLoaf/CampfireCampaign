@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../../api/client";
-import type { CustomEntry, CustomEntryInput, CustomKind } from "../../api/types";
+import { ABILITIES, type Ability, type CustomEntry, type CustomEntryInput, type CustomKind, type HomebrewRaceData } from "../../api/types";
 import ErrorText, { useAction } from "../ErrorText";
 
 export const KIND_LABEL: Record<CustomKind, string> = {
@@ -10,7 +10,9 @@ export const KIND_LABEL: Record<CustomKind, string> = {
   item: "Item",
   background: "Background",
   species_trait: "Species trait",
+  race: "Race",
 };
+const MAX_RACE_TRAITS = 8;
 const KINDS = Object.keys(KIND_LABEL) as CustomKind[];
 const SCHOOLS = ["Abjuration", "Conjuration", "Divination", "Enchantment", "Evocation", "Illusion", "Necromancy", "Transmutation"];
 
@@ -34,7 +36,16 @@ type Draft = {
   // background
   skills: string;
   tool: string;
+  // race
+  speed: string;
+  size: "Small" | "Medium";
+  darkvision: string;
+  bonuses: Record<Ability, string>;
+  languages: string;
+  traits: { name: string; text: string }[];
 };
+
+const NO_BONUSES: Record<Ability, string> = { STR: "", DEX: "", CON: "", INT: "", WIS: "", CHA: "" };
 
 const EMPTY: Draft = {
   kind: "feat",
@@ -50,6 +61,12 @@ const EMPTY: Draft = {
   category: "Gear",
   skills: "",
   tool: "",
+  speed: "30",
+  size: "Medium",
+  darkvision: "0",
+  bonuses: { ...NO_BONUSES },
+  languages: "Common",
+  traits: [{ name: "", text: "" }],
 };
 
 function toDraft(e: CustomEntry): Draft {
@@ -70,7 +87,27 @@ function toDraft(e: CustomEntry): Draft {
     category: s("category", "Gear"),
     skills: Array.isArray(d.skills) ? (d.skills as unknown[]).map(String).join(", ") : s("skills"),
     tool: s("tool"),
+    ...(e.kind === "race" ? raceDraft(d as Partial<HomebrewRaceData>) : {}),
   };
+}
+
+function raceDraft(d: Partial<HomebrewRaceData>): Partial<Draft> {
+  const bonuses = { ...NO_BONUSES };
+  for (const k of ABILITIES) if (d.ability_bonuses?.[k]) bonuses[k] = String(d.ability_bonuses[k]);
+  const traits = Array.isArray(d.traits) ? d.traits.map((t) => ({ name: String(t.name ?? ""), text: String(t.text ?? "") })) : [];
+  return {
+    speed: String(d.speed ?? 30),
+    size: d.size === "Small" ? "Small" : "Medium",
+    darkvision: String(d.darkvision ?? 0),
+    bonuses,
+    languages: Array.isArray(d.languages) ? d.languages.join(", ") : "Common",
+    traits: traits.length ? traits : [{ name: "", text: "" }],
+  };
+}
+
+/** Sum of a draft's racial ability bonuses (the server allows +3 total, each +1 or +2). */
+function bonusTotal(b: Record<Ability, string>): number {
+  return ABILITIES.reduce((s, k) => s + (Number(b[k]) || 0), 0);
 }
 
 function num(s: string): number | null {
@@ -93,7 +130,23 @@ function toInput(d: Draft): CustomEntryInput {
         .filter(Boolean),
       tool: d.tool.trim(),
     };
-  else base.data = {};
+  else if (d.kind === "race") {
+    base.level = null;
+    const ability_bonuses: Partial<Record<Ability, number>> = {};
+    for (const k of ABILITIES) if (Number(d.bonuses[k])) ability_bonuses[k] = Number(d.bonuses[k]);
+    const data: HomebrewRaceData = {
+      speed: num(d.speed) ?? 30,
+      size: d.size,
+      darkvision: (Number(d.darkvision) || 0) as HomebrewRaceData["darkvision"],
+      ability_bonuses,
+      languages: d.languages
+        .split(",")
+        .map((x) => x.trim())
+        .filter(Boolean),
+      traits: d.traits.map((t) => ({ name: t.name.trim(), text: t.text.trim() })).filter((t) => t.name || t.text),
+    };
+    base.data = { ...data };
+  } else base.data = {};
   return base;
 }
 
@@ -168,7 +221,7 @@ export default function MyContentPanel() {
               <span className="label">Name</span>
               <input value={d.name} onChange={(e) => setD({ name: e.target.value })} maxLength={80} required />
             </label>
-            {d.kind !== "item" && d.kind !== "background" && (
+            {d.kind !== "item" && d.kind !== "background" && d.kind !== "race" && (
               <label className="field narrow">
                 <span className="label">{d.kind === "spell" ? "Spell level" : "Level"}</span>
                 <input type="number" min={0} max={20} value={d.level} placeholder={d.kind === "spell" ? "0 = cantrip" : "optional"} onChange={(e) => setD({ level: e.target.value })} />
@@ -227,6 +280,82 @@ export default function MyContentPanel() {
                 <input value={d.tool} placeholder="Calligrapher's supplies" onChange={(e) => setD({ tool: e.target.value })} />
               </label>
             </div>
+          )}
+          {d.kind === "race" && (
+            <>
+              <p className="muted small">Pick this race in the character creator (My homebrew races). Ability bonuses apply with the 2014 rules only.</p>
+              <div className="row gap wrap">
+                <label className="field narrow">
+                  <span className="label">Speed (ft)</span>
+                  <input type="number" min={20} max={40} step={5} value={d.speed} onChange={(e) => setD({ speed: e.target.value })} />
+                </label>
+                <label className="field">
+                  <span className="label">Size</span>
+                  <select value={d.size} onChange={(e) => setD({ size: e.target.value === "Small" ? "Small" : "Medium" })}>
+                    <option>Medium</option>
+                    <option>Small</option>
+                  </select>
+                </label>
+                <label className="field">
+                  <span className="label">Darkvision</span>
+                  <select value={d.darkvision} onChange={(e) => setD({ darkvision: e.target.value })}>
+                    <option value="0">None</option>
+                    <option value="60">60 ft</option>
+                    <option value="120">120 ft</option>
+                  </select>
+                </label>
+                <label className="field grow">
+                  <span className="label">Languages (comma separated)</span>
+                  <input value={d.languages} placeholder="Common, Sylvan" onChange={(e) => setD({ languages: e.target.value })} />
+                </label>
+              </div>
+              <div className="row gap wrap">
+                {ABILITIES.map((k) => (
+                  <label key={k} className="field narrow">
+                    <span className="label">{k}</span>
+                    <select value={d.bonuses[k]} onChange={(e) => setD({ bonuses: { ...d.bonuses, [k]: e.target.value } })}>
+                      <option value="">—</option>
+                      <option value="1">+1</option>
+                      <option value="2">+2</option>
+                    </select>
+                  </label>
+                ))}
+                <span className={`small ${bonusTotal(d.bonuses) > 3 ? "error-text" : "muted"}`}>
+                  Total +{bonusTotal(d.bonuses)} of +3 (2014 rules)
+                </span>
+              </div>
+              <span className="label">Traits ({d.traits.length}/{MAX_RACE_TRAITS})</span>
+              {d.traits.map((t, i) => (
+                <div key={i} className="stack-tight">
+                  <div className="row gap">
+                    <input
+                      className="grow"
+                      value={t.name}
+                      placeholder="Trait name"
+                      maxLength={60}
+                      onChange={(e) => setD({ traits: d.traits.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) })}
+                    />
+                    <button type="button" className="btn tiny ghost danger" onClick={() => setD({ traits: d.traits.filter((_, j) => j !== i) })}>
+                      Remove
+                    </button>
+                  </div>
+                  <textarea
+                    rows={2}
+                    value={t.text}
+                    placeholder="What it does, in rules terms (the DM rules from this text)"
+                    maxLength={600}
+                    onChange={(e) => setD({ traits: d.traits.map((x, j) => (j === i ? { ...x, text: e.target.value } : x)) })}
+                  />
+                </div>
+              ))}
+              {d.traits.length < MAX_RACE_TRAITS && (
+                <div>
+                  <button type="button" className="btn tiny ghost" onClick={() => setD({ traits: [...d.traits, { name: "", text: "" }] })}>
+                    Add trait
+                  </button>
+                </div>
+              )}
+            </>
           )}
 
           <label className="field">

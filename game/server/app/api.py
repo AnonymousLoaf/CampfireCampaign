@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import secrets
 from datetime import datetime, timezone
 from typing import Any, Callable
@@ -26,8 +27,8 @@ from .game import notify
 from .game.notify import nudge as send_nudge
 from .game.state import LIVE_EDITABLE, Ctx, build_view, clean_settings, load, lock_for
 from .config import DATA_DIR
-from .models import (AbilityRoll, Character, CustomEntry, DMCall, Game, LogEntry, Membership, PushSubscription,
-                     SessionToken, User)
+from .models import (AbilityRoll, Character, ChatMessage, CustomEntry, DMCall, Game, LogEntry, Membership,
+                     PushSubscription, SessionToken, User)
 from .rules import character as ch
 from .rules import dice, srd
 from .rules import shop as shop_rules
@@ -36,6 +37,7 @@ from .security import decrypt_secret, encrypt_secret, hash_password, verify_pass
 
 router = APIRouter(prefix="/api")
 COOKIE = "session"
+log = logging.getLogger("game.api")
 
 
 # ── auth ────────────────────────────────────────────────────────────────────
@@ -58,7 +60,8 @@ def me_dict(u: User) -> dict:
     return {"id": u.id, "username": u.username, "display_name": u.display_name,
             "has_api_key": bool(u.api_key_enc), "api_key_last4": u.api_key_last4,
             "email": u.email, "notify": {"email": bool(u.notify_email), "push": bool(u.notify_push if u.notify_push is not None else True),
-                                         "remind_minutes": u.remind_minutes if u.remind_minutes is not None else 60}}
+                                         "remind_minutes": u.remind_minutes if u.remind_minutes is not None else 60,
+                                         "chat": bool(u.notify_chat)}}
 
 
 def _login(resp: Response, db: Session, u: User) -> dict:
@@ -151,6 +154,7 @@ class NotifyBody(BaseModel):
     notify_email: bool | None = None
     notify_push: bool | None = None
     remind_minutes: int | None = Field(default=None, ge=0, le=10080)
+    notify_chat: bool | None = None
 
 
 @router.put("/me/notifications")
@@ -167,6 +171,8 @@ def put_notifications(body: NotifyBody, u: User = Depends(current_user), db: Ses
         u.notify_push = body.notify_push
     if body.remind_minutes is not None:
         u.remind_minutes = body.remind_minutes
+    if body.notify_chat is not None:
+        u.notify_chat = body.notify_chat
     db.commit()
     return me_dict(u)
 
@@ -263,8 +269,16 @@ def create_character(body: dict, u: User = Depends(current_user), db: Session = 
         if not roll or roll.user_id != u.id or roll.used:
             raise HTTPException(400, "roll your ability scores first")
         sets = roll.sets
+    homebrew = None
+    race_req = str(body.get("race") or "")
+    if race_req == "homebrew" or race_req.startswith("homebrew:"):  # one of my homebrew races from My content
+        eid = str(body.get("homebrew_race_id") or race_req.partition(":")[2])
+        entry = db.get(CustomEntry, eid) if eid else None
+        if not entry or entry.user_id != u.id or entry.kind != "race":
+            raise HTTPException(400, "that homebrew race isn't in your content library")
+        homebrew = _custom_dict(entry)
     try:
-        sheet = ch.create(body, sets)
+        sheet = ch.create(body, sets, homebrew=homebrew)
     except RulesError as e:
         raise HTTPException(400, str(e))
     if roll:
@@ -403,7 +417,7 @@ def get_portrait(name: str):
 
 # ── custom content library ──────────────────────────────────────────────────
 
-CUSTOM_KINDS = {"feat", "feature", "spell", "item", "background", "species_trait"}
+CUSTOM_KINDS = {"feat", "feature", "spell", "item", "background", "species_trait", "race"}
 
 
 class CustomBody(BaseModel):
@@ -423,7 +437,15 @@ def _clean_custom(body: CustomBody) -> dict:
     if body.kind not in CUSTOM_KINDS:
         raise HTTPException(400, "kind must be one of: " + ", ".join(sorted(CUSTOM_KINDS)))
     data = {k: v for k, v in (body.data or {}).items() if isinstance(k, str) and len(k) < 40}
-    if len(json.dumps(data)) > 4000:
+    limit = 4000
+    if body.kind == "race":  # homebrew race: speed, size, bonuses, languages, up to 8 traits
+        from .rules import campfire_races
+        try:
+            data = campfire_races.clean_homebrew_race(data)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        limit = campfire_races.HOMEBREW_DATA_MAX
+    if len(json.dumps(data)) > limit:
         raise HTTPException(400, "too much extra data")
     return {"kind": body.kind, "name": body.name.strip(), "description": body.description.strip(), "level": body.level,
             "data": data}
@@ -477,6 +499,8 @@ async def attach_custom(cid: str, body: AttachBody, u: User = Depends(current_us
         e = db.get(CustomEntry, body.entry_id)
         if not e or e.user_id != u.id:
             raise HTTPException(404, "entry not found")
+        if e.kind == "race":
+            raise HTTPException(400, "homebrew races are chosen when you create a character")
         entry = _custom_dict(e)
     finally:
         db.close()
@@ -708,6 +732,7 @@ def _remove_member(ctx: Ctx, m: Membership) -> dict:
 @router.post("/games/{gid}/leave")
 async def leave(gid: str, u: User = Depends(current_user)):
     res = await mutate(gid, u, lambda ctx: _remove_member(ctx, _member(ctx, u)))
+    hub.forget(gid, u.id)
     await hub.lobby_changed([u.id])
     return res
 
@@ -725,6 +750,7 @@ async def remove_player(gid: str, body: RemoveBody, u: User = Depends(current_us
             raise RulesError("they aren't in this game")
         return _remove_member(ctx, m)
     res = await mutate(gid, u, fn)
+    hub.forget(gid, body.user_id)
     await hub.lobby_changed([body.user_id])  # the removed player's game list
     return res
 
@@ -744,7 +770,7 @@ async def delete_game(gid: str, u: User = Depends(current_user)):
                 raise HTTPException(409, "the DM is writing — try again in a moment")
             members = [m.user_id for m in db.scalars(select(Membership).where(Membership.game_id == gid))]
             db.execute(update(Character).where(Character.game_id == gid).values(game_id=None))
-            for model in (LogEntry, DMCall, Membership):
+            for model in (LogEntry, DMCall, ChatMessage, Membership):
                 db.execute(delete(model).where(model.game_id == gid))
             db.execute(delete(Game).where(Game.id == gid))
             db.commit()
@@ -1193,6 +1219,31 @@ async def nudge(gid: str, body: NudgeBody, u: User = Depends(current_user)):
     return res
 
 
+class InviteBody(BaseModel):
+    email: str = Field(min_length=3, max_length=200)
+
+
+@router.post("/games/{gid}/invite")
+async def invite_by_email(gid: str, body: InviteBody, u: User = Depends(current_user), db: Session = Depends(get_db)):
+    g = db.get(Game, gid)
+    if not g:
+        raise HTTPException(404, "game not found")
+    m = db.scalar(select(Membership).where(Membership.game_id == gid, Membership.user_id == u.id))
+    if not m or m.role == "spectator":
+        raise HTTPException(403, "only players in this game can send invites")
+    to = body.email.strip()
+    if "@" not in to or " " in to or "\n" in to or "\r" in to:
+        raise HTTPException(400, "that doesn't look like an email address")
+    try:
+        await notify.send_invite(g.id, g.name, u.display_name, g.invite_code, to, started=g.status != "lobby")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        log.warning("invite email failed: %s", e)
+        raise HTTPException(502, "couldn't send the email — check the server's mail settings")
+    return {"ok": True}
+
+
 class AwayBody(BaseModel):
     until: str | None = None  # ISO time; null = back now; "indefinite" = until I come back
 
@@ -1255,6 +1306,132 @@ def mark_seen(gid: str, body: SeenBody, u: User = Depends(current_user), db: Ses
         raise HTTPException(403, "you're not in this game")
     if not m.last_seen_id or body.log_id > m.last_seen_id:
         m.last_seen_id = body.log_id
+        db.commit()
+    return {"ok": True}
+
+
+# ── table chat ──────────────────────────────────────────────────────────────
+# Out-of-character talk between the people in a game. Stored apart from the story log, so the DM never sees it.
+
+CHAT_MAX = 1000
+
+
+def _chat_dict(c: ChatMessage) -> dict:
+    return {"id": c.id, "user_id": c.user_id, "author": c.author, "text": "" if c.deleted else c.text,
+            "ts": c.ts.isoformat() if c.ts else None, "edited": c.edited_at is not None, "deleted": bool(c.deleted)}
+
+
+def _chat_member(db: Session, gid: str, u: User) -> Membership:
+    m = db.scalar(select(Membership).where(Membership.game_id == gid, Membership.user_id == u.id))
+    if not m:
+        raise HTTPException(403, "you're not in this game")
+    return m
+
+
+def _chat_text(text: str) -> str:
+    t = (text or "").strip()
+    if not t:
+        raise HTTPException(400, "type a message first")
+    if len(t) > CHAT_MAX:
+        raise HTTPException(400, f"keep messages under {CHAT_MAX} characters")
+    return t
+
+
+class ChatBody(BaseModel):
+    text: str = Field(max_length=4000)
+
+
+@router.get("/games/{gid}/chat")
+def chat_list(gid: str, before_id: int | None = None, limit: int = 50,
+              u: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Newest messages, oldest first; pass before_id to page back through history."""
+    _chat_member(db, gid, u)
+    q = select(ChatMessage).where(ChatMessage.game_id == gid)
+    if before_id:
+        q = q.where(ChatMessage.id < before_id)
+    limit = max(1, min(200, limit))
+    rows = list(db.scalars(q.order_by(ChatMessage.id.desc()).limit(limit + 1)))
+    msgs = [_chat_dict(c) for c in rows[:limit]]
+    msgs.reverse()
+    return {"messages": msgs, "has_more": len(rows) > limit}
+
+
+@router.post("/games/{gid}/chat")
+async def chat_post(gid: str, body: ChatBody, u: User = Depends(current_user)):
+    db = SessionLocal()
+    try:
+        m = _chat_member(db, gid, u)
+        if m.role == "spectator":
+            raise HTTPException(403, "spectators can read the chat but not post")
+        text = _chat_text(body.text)
+        g = db.get(Game, gid)
+        c = ChatMessage(game_id=gid, user_id=u.id, author=u.display_name, text=text)
+        db.add(c)
+        db.flush()
+        m.last_chat_seen_id = c.id  # your own message counts as read
+        db.commit()
+        out = _chat_dict(c)
+        member_ids = [x.user_id for x in db.scalars(select(Membership).where(Membership.game_id == gid))]
+        game_name, live = g.name, bool((g.settings or {}).get("live"))
+    finally:
+        db.close()
+    await hub.chat(gid, out)
+    flow.spawn(notify.notify_chat(gid, game_name, live, u.id, u.display_name, text, member_ids, hub.watching(gid)))
+    return out
+
+
+def _own_chat(db: Session, gid: str, mid: int, u: User, allow_host: bool = False) -> ChatMessage:
+    _chat_member(db, gid, u)
+    c = db.get(ChatMessage, mid)
+    if not c or c.game_id != gid or c.deleted:
+        raise HTTPException(404, "message not found")
+    if c.user_id != u.id:
+        g = db.get(Game, gid)
+        if not (allow_host and g and g.host_id == u.id):
+            raise HTTPException(403, "you can only change your own messages")
+    return c
+
+
+@router.patch("/games/{gid}/chat/{mid}")
+async def chat_edit(gid: str, mid: int, body: ChatBody, u: User = Depends(current_user)):
+    db = SessionLocal()
+    try:
+        c = _own_chat(db, gid, mid, u)
+        c.text = _chat_text(body.text)
+        c.edited_at = datetime.now(timezone.utc)
+        db.commit()
+        out = _chat_dict(c)
+    finally:
+        db.close()
+    await hub.chat(gid, out)
+    return out
+
+
+@router.delete("/games/{gid}/chat/{mid}")
+async def chat_delete(gid: str, mid: int, u: User = Depends(current_user)):
+    """Delete your own message (the host can remove anyone's). Leaves a "message deleted" placeholder."""
+    db = SessionLocal()
+    try:
+        c = _own_chat(db, gid, mid, u, allow_host=True)
+        c.deleted = True
+        c.text = ""
+        db.commit()
+        out = _chat_dict(c)
+    finally:
+        db.close()
+    await hub.chat(gid, out)
+    return out
+
+
+class ChatSeenBody(BaseModel):
+    message_id: int
+
+
+@router.post("/games/{gid}/chat/seen")
+def chat_seen(gid: str, body: ChatSeenBody, u: User = Depends(current_user), db: Session = Depends(get_db)):
+    m = _chat_member(db, gid, u)
+    if not m.last_chat_seen_id or body.message_id > m.last_chat_seen_id:
+        m.last_chat_seen_id = body.message_id
         db.commit()
     return {"ok": True}
 
@@ -1436,6 +1613,7 @@ async def ws_endpoint(ws: WebSocket):
                     try:
                         if db.scalar(select(Membership).where(Membership.game_id == target, Membership.user_id == uid)):
                             conn.games.add(target)
+                            conn.member_games.add(target)
                     finally:
                         db.close()
             elif "subscribe_tv" in msg:

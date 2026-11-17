@@ -62,6 +62,31 @@ def email_available() -> bool:
     return bool(os.environ.get("GAME_SMTP_HOST"))
 
 
+INVITE_LIMIT_PER_HOUR = 20
+_invites_sent: dict[str, list[float]] = {}  # game_id -> monotonic times of recent invite emails
+
+
+async def send_invite(game_id: str, game_name: str, inviter: str, invite_code: str, to: str, started: bool) -> None:
+    """Email someone a game's invite code and a join link. Raises ValueError when email isn't set up
+    or the game has sent too many invites in the last hour."""
+    import time
+    if not email_available():
+        raise ValueError("email isn't set up on this server")
+    t = time.monotonic()
+    recent = [x for x in _invites_sent.get(game_id, []) if t - x < 3600]
+    if len(recent) >= INVITE_LIMIT_PER_HOUR:
+        raise ValueError("that's a lot of invites for one hour — try again later")
+    link = f"{PUBLIC_URL.rstrip('/')}/#/join/{invite_code}" if PUBLIC_URL else ""
+    what = "watch their game" if started else "join their game"
+    body = (f"{inviter} invited you to {what} \"{game_name}\" on Campfire Campaign.\n\n"
+            + (f"Join here: {link}\n\n" if link else "")
+            + f"Or sign in, choose Join a game and enter the invite code: {invite_code}\n\n"
+            + "You'll need an account and, to play, a character. If you weren't expecting this, you can ignore it.")
+    await run_in_threadpool(_send_email_sync, to, f"{inviter} invited you to {game_name}", body)
+    recent.append(t)
+    _invites_sent[game_id] = recent
+
+
 def _send_email_sync(to: str, subject: str, body: str) -> None:
     host = os.environ["GAME_SMTP_HOST"]
     port = int(os.environ.get("GAME_SMTP_PORT", "587"))
@@ -106,7 +131,7 @@ def _send_push_sync(subs: list[tuple[int, str, dict]], payload: dict) -> list[in
     return gone
 
 
-async def notify_users(user_ids: list[str], title: str, body: str, url: str = "/") -> None:
+async def notify_users(user_ids: list[str], title: str, body: str, url: str = "/", email: bool = True) -> None:
     if not user_ids:
         return
     db = SessionLocal()
@@ -130,7 +155,7 @@ async def notify_users(user_ids: list[str], title: str, body: str, url: str = "/
                     db.commit()
                 finally:
                     db.close()
-        if u.notify_email and u.email and email_available():
+        if email and u.notify_email and u.email and email_available():
             link = (PUBLIC_URL.rstrip("/") + url) if PUBLIC_URL else ""
             try:
                 await run_in_threadpool(_send_email_sync, u.email, title, body + (f"\n\n{link}" if link else ""))
@@ -181,6 +206,36 @@ async def nudge(ctx: Ctx, user_id: str) -> None:
     await notify_users([user_id], f"{ctx.game.name}: the party is waiting", "The host nudged you — it's your move.",
                        _game_url(ctx))
     await send_discord(ctx.settings.get("discord_webhook"), f"**{ctx.game.name}**: {name}, the party is waiting on you!")
+
+
+CHAT_PUSH_GAP_SECONDS = 10 * 60
+_chat_pushed: dict[tuple[str, str], float] = {}  # (game_id, user_id) -> monotonic time of the last chat push
+
+
+async def notify_chat(game_id: str, game_name: str, live: bool, author_id: str, author: str, text: str,
+                      member_ids: list[str], watching: set[str]) -> None:
+    """Push a new chat message to members who turned chat notifications on and don't have the game open.
+    At most one push per person per game every 10 minutes, so a busy chat doesn't buzz phones nonstop.
+    Push only (no email), and nothing during a live session."""
+    import time
+    if live:
+        return
+    t = time.monotonic()
+    targets = [u for u in member_ids if u != author_id and u not in watching
+               and t - _chat_pushed.get((game_id, u), -1e9) >= CHAT_PUSH_GAP_SECONDS]
+    if not targets:
+        return
+    db = SessionLocal()
+    try:
+        targets = [u.id for u in db.scalars(select(User).where(User.id.in_(targets))) if u.notify_chat]
+    finally:
+        db.close()
+    if not targets:
+        return
+    for u in targets:
+        _chat_pushed[(game_id, u)] = t
+    body = text if len(text) <= 140 else text[:140] + "…"
+    await notify_users(targets, f"{game_name} · {author}", body, f"/#/game/{game_id}", email=False)
 
 
 async def send_reminders() -> None:

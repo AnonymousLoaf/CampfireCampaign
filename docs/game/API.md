@@ -427,3 +427,17 @@ Fights are played in words, in individual initiative order (`encounter.mode` is 
 - **DM tools** (act only on the character whose turn it is): `combat_move` (x/y, `toward`, or `away_from` a creature), `combat_attack` (target, weapon), `combat_cast` (spell, target or x/y, slot_level), `combat_feature` (feature, target), `combat_action` (dodge, dash, disengage, hide, help, ready, use_item, other), `combat_end_turn` (runs the monsters' turns up to the next player and reports them). Each turn's DM message includes a text brief: a coordinate grid of the map, every creature's square, distance, HP and AC, and the actor's movement, action economy, weapons, spells, slots and features.
 - **After the DM's reply:** if it resolved something but didn't end the turn, the game ends it and asks the DM to narrate what followed; if it changed nothing (asked the player to clarify), the same player's turn stays open. Timeouts and away players: the AI (or a Dodge) takes the turn and the DM narrates it.
 - `start_combat` takes `terrain` (now including `town`) and `distance` (`close` 10-20 ft, `near` 30-40 ft, `far`); its result reports initiative and any enemy attacks before the first player's turn.
+
+# Table chat
+
+Out-of-character messages between the people in a game ("table talk"), so a party can plan or say what they're doing when they aren't together. Stored in its own `chat_messages` table, **not** the story log, so the DM never reads it. Kept for the life of the game.
+
+- `GET /games/{id}/chat?before_id=&limit=50` → `{messages: ChatMessage[], has_more}`: newest page, oldest first; page back with `before_id`. Members only (host, players, spectators).
+- `POST /games/{id}/chat {text}` → `ChatMessage`. 1-1000 characters after trimming. Host and players only; spectators can read but not post (403). Posting marks the chat read for the sender.
+- `PATCH /games/{id}/chat/{mid} {text}`: edit your own message (`edited: true`).
+- `DELETE /games/{id}/chat/{mid}`: delete your own message; the host can delete anyone's. Leaves a placeholder (`deleted: true`, `text: ""`).
+- `POST /games/{id}/chat/seen {message_id}`: records how far I've read.
+- `ChatMessage`: `{id, user_id|null, author (display name when sent), text, ts, edited, deleted}`.
+- `GameView.me` gains `last_chat_seen_id: n|null` and `chat_unseen: n` (others' messages after it).
+- WebSocket: members (not TV links) receive `{"type": "chat", "game_id", "message": ChatMessage}` for every post, edit and delete. Leaving or being removed stops it.
+- Notifications: `PUT /me/notifications {notify_chat: bool}` (default off; `me.notify.chat`). Push only, never email; only to members who don't have the game open; at most one per person per game every 10 minutes; nothing during a live session.

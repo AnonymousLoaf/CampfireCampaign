@@ -13,6 +13,7 @@ class Conn:
     ws: WebSocket
     user_id: str | None
     games: set[str] = field(default_factory=set)
+    member_games: set[str] = field(default_factory=set)  # games joined as a member (not via a TV link)
     lobby: bool = False
 
 
@@ -35,6 +36,22 @@ class Hub:
     async def game_changed(self, game_id: str) -> None:
         msg = {"type": "update", "game_id": game_id}
         await asyncio.gather(*(self._send(c, msg) for c in list(self.conns) if game_id in c.games))
+
+    async def chat(self, game_id: str, message: dict) -> None:
+        """A chat message was posted, edited or deleted. Only members get it — never TV links."""
+        msg = {"type": "chat", "game_id": game_id, "message": message}
+        await asyncio.gather(*(self._send(c, msg) for c in list(self.conns) if game_id in c.member_games))
+
+    def forget(self, game_id: str, user_id: str) -> None:
+        """Someone left or was removed: stop sending them this game's chat."""
+        for c in self.conns:
+            if c.user_id == user_id:
+                c.member_games.discard(game_id)
+                c.games.discard(game_id)
+
+    def watching(self, game_id: str) -> set[str]:
+        """Users with this game open right now."""
+        return {c.user_id for c in self.conns if c.user_id and game_id in c.member_games}
 
     async def lobby_changed(self, user_ids: list[str]) -> None:
         ids = set(user_ids)

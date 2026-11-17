@@ -116,6 +116,10 @@ $env:GAME_SMTP_FROM = "Async D&D <you@example.com>"
 $env:GAME_PUBLIC_URL = "https://your-game-address"   # so emails can link back to the game
 ```
 
+For Gmail, use `smtp.gmail.com`, port 587, and an [app password](https://myaccount.google.com/apppasswords) (the account needs 2-Step Verification).
+
+Once email is set up, players also get a **✉ Invite** button in a game's header before it starts. It emails a friend the invite code and a `#/join/CODE` link that opens the join dialog with the code filled in. Each game can send up to 20 invites an hour.
+
 Nothing is sent during a live session.
 
 ## Tests

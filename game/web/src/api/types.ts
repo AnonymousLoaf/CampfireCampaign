@@ -10,6 +10,7 @@ export interface NotifyPrefs {
   email: boolean;
   push: boolean;
   remind_minutes: number;
+  chat?: boolean;
 }
 
 export interface Me {
@@ -28,6 +29,18 @@ export interface NotificationsPatch {
   notify_email?: boolean;
   notify_push?: boolean;
   remind_minutes?: number;
+  notify_chat?: boolean;
+}
+
+/** Out-of-character table chat (the DM never reads it). */
+export interface ChatMessage {
+  id: number;
+  user_id: string | null;
+  author: string;
+  text: string;
+  ts: string | null;
+  edited: boolean;
+  deleted: boolean;
 }
 
 export interface Meta {
@@ -83,6 +96,29 @@ export interface Race {
   subraces: Subrace[];
   ability_choices?: null | { count: number; amount: number; exclude: Ability[] };
   ancestries?: null | { name: string; damage_type: string }[];
+  /** "srd" (SRD races), "campfire" (original Campfire Campaign races) or "homebrew" (my content). */
+  group?: RaceGroup;
+  source?: string;
+  concept?: string;
+  trait_details?: RaceTrait[];
+}
+
+export type RaceGroup = "srd" | "campfire" | "homebrew";
+
+export interface RaceTrait {
+  name: string;
+  description: string;
+}
+
+/** `data` of a "race" custom entry (homebrew race). */
+export interface HomebrewRaceData {
+  speed: number;
+  size: "Small" | "Medium";
+  darkvision: 0 | 60 | 120;
+  /** Applied with the 2014 rules only (2024 ability increases come from the background). */
+  ability_bonuses: Partial<AbilityMap>;
+  languages: string[];
+  traits: { name: string; text: string }[];
 }
 
 export interface ClassSpellcasting {
@@ -316,9 +352,12 @@ export interface CharacterView {
   // M4
   portrait_url?: string | null;
   custom?: AttachedCustom[];
+  // more races: traits of Campfire / homebrew races (SRD races send none)
+  race_source?: RaceGroup;
+  race_traits?: RaceTrait[];
 }
 
-export type CustomKind = "feat" | "feature" | "spell" | "item" | "background" | "species_trait";
+export type CustomKind = "feat" | "feature" | "spell" | "item" | "background" | "species_trait" | "race";
 
 /** A custom entry attached to a character (homebrew or content from a book the player owns). */
 export interface AttachedCustom {
@@ -375,6 +414,8 @@ export interface CreateCharacter {
   background_asi?: Partial<AbilityMap>;
   masteries?: string[];
   magic_initiate?: null | { cantrips: string[]; spell: string };
+  /** With race "homebrew": the id of one of my "race" custom entries. */
+  homebrew_race_id?: string;
 }
 
 export interface AbilityRoll {
@@ -674,6 +715,8 @@ export interface GameView {
     role?: "host" | "player" | "spectator";
     last_seen_id?: number | null;
     unseen_count?: number;
+    last_chat_seen_id?: number | null;
+    chat_unseen?: number;
   };
   tv_url?: string | null;
   members: Member[];

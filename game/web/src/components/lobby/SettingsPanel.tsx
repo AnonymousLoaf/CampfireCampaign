@@ -194,6 +194,24 @@ function NotificationSettings({ me, onMeChange }: { me: Me; onMeChange: (m: Me) 
         </form>
       </div>
 
+      <div className={`notify-block ${pushAvail ? "" : "disabled"}`}>
+        <div className="row-between">
+          <strong>Chat messages</strong>
+          <label className="toggle">
+            <input
+              type="checkbox"
+              checked={!!notify.chat}
+              disabled={!pushAvail || patching}
+              onChange={(e) => void patch({ notify_chat: e.target.checked })}
+            />
+            <span>{notify.chat ? "On" : "Off"}</span>
+          </label>
+        </div>
+        <div className="muted small">
+          A push when someone posts in a game's chat while you don't have it open — at most one every 10 minutes per game.
+        </div>
+      </div>
+
       <div className="notify-block">
         <label className="row gap center wrap">
           <span>Remind me</span>

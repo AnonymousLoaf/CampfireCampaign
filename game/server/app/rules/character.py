@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 import uuid
 
+from . import campfire_races as cf
 from . import srd
 from .classes import (ABILITIES, ALIGNMENTS, DRAGON_ANCESTRIES, FIGHTING_STYLES, MEDIUM_ARMOR, POINT_BUY_COSTS,
                       RACE_EXTRAS, RACE_RESISTANCES, SKILLS, STANDARD_ARRAY)
@@ -255,8 +256,31 @@ def _species_2024() -> dict:
     return _SPECIES_CACHE
 
 
+def nonsrd_race(sheet: dict) -> dict | None:
+    """The record for a Campfire race (looked up live) or a homebrew race (snapshot on the sheet); None for SRD races."""
+    if sheet.get("homebrew_race") and isinstance(sheet.get("race_data"), dict):
+        return sheet["race_data"]
+    return cf.CAMPFIRE_RACES.get(sheet.get("race") or "")
+
+
+def race_source(sheet: dict) -> str:
+    if sheet.get("homebrew_race"):
+        return "homebrew"
+    return "campfire" if sheet.get("race") in cf.CAMPFIRE_RACES else "srd"
+
+
+def race_traits(sheet: dict) -> list[dict]:
+    """[{name, description}] for Campfire and homebrew races (SRD races' traits live in the rules data)."""
+    rec = nonsrd_race(sheet)
+    return cf.trait_list(rec, rs(sheet)) if rec else []
+
+
 def race_info(sheet: dict) -> dict:
     """{name, speed, resistances, mechanics} for the character's race (2014) or species (2024)."""
+    rec = nonsrd_race(sheet)
+    if rec:
+        return {"name": rec.get("name") or "Unknown", "speed": int(rec.get("speed") or 30),
+                "resistances": list(rec.get("resistances") or []), "mechanics": dict(rec.get("mechanics") or {})}
     if rs(sheet) == "2024":
         sp = _species_2024().get(sheet["race"], {})
         mech = dict(sp.get("mechanics") or {})
@@ -313,7 +337,7 @@ def creator_options(ruleset: str = "2014") -> dict:
                           "ability_bonuses": {}, "traits": sp.get("traits", []), "languages": [],
                           "subraces": [{"index": s["index"], "name": s["name"], "ability_bonuses": {}, "traits": []}
                                        for s in sp.get("subspecies", [])],
-                          "ability_choices": None, "ancestries": None})
+                          "ability_choices": None, "ancestries": None, "group": "srd", "source": "SRD 5.2"})
     else:
         subs = srd.subraces()
         for r in srd.races().values():
@@ -326,7 +350,9 @@ def creator_options(ruleset: str = "2014") -> dict:
                               "traits": s.get("traits") or []} for s in subs.values() if s.get("race") == r["name"]],
                 "ability_choices": extra.get("ability_choices"),
                 "ancestries": [{"name": a["name"], "damage_type": a["damage_type"]} for a in extra.get("ancestries", [])] or None,
+                "group": "srd", "source": "SRD 5.1",
             })
+    races += cf.campfire_options(ruleset)  # original Campfire Campaign races, after the SRD ones
     classes = []
     for c in rules.CLASSES.values():
         sc = c["spellcasting"]
@@ -531,7 +557,33 @@ def _ancestry_from_subspecies(sub_name: str | None) -> dict | None:
     return None
 
 
-def create(payload: dict, roll_sets: list | None = None, starting_level: int = 1) -> dict:
+def _custom_race_choice(payload: dict, homebrew: dict | None) -> tuple[str, dict, dict | None] | None:
+    """(race index, record, homebrew snapshot) for a Campfire or homebrew race choice; None for SRD races.
+
+    `homebrew` is the user's own custom entry ({id, name, description, data}), already ownership-checked by the API.
+    """
+    req = str(payload.get("race") or "")
+    if req == "homebrew" or req.startswith("homebrew:"):
+        if not homebrew:
+            raise RulesError("choose one of your homebrew races")
+        try:
+            data = cf.clean_homebrew_race(homebrew.get("data") or {})
+        except ValueError as e:
+            raise RulesError(f"homebrew race {homebrew.get('name', '')}: {e}")
+        snap = {"name": str(homebrew.get("name") or "Homebrew race")[:80], **data,
+                "description": str(homebrew.get("description") or "")[:2000]}
+        rec = snap
+    elif req in cf.CAMPFIRE_RACES:
+        rec, snap = cf.CAMPFIRE_RACES[req], None
+    else:
+        return None
+    if payload.get("subrace"):
+        raise RulesError(f"{rec['name']} has no subraces")
+    return ("homebrew" if snap else req), rec, snap
+
+
+def create(payload: dict, roll_sets: list | None = None, starting_level: int = 1, homebrew: dict | None = None) -> dict:
+    """Build a level-1 sheet (then level it to `starting_level`). `homebrew`: the player's own homebrew race entry."""
     ruleset = payload.get("ruleset") or "2014"
     if ruleset not in ("2014", "2024"):
         raise RulesError("unknown ruleset")
@@ -554,14 +606,22 @@ def create(payload: dict, roll_sets: list | None = None, starting_level: int = 1
     ancestry = None
     sub_index = None
     feats: list[str] = []
+    custom = _custom_race_choice(payload, homebrew)
+    custom_race = custom[1] if custom else None
+    homebrew_snap = custom[2] if custom else None
 
     if ruleset == "2024":
         species = _species_2024()
         sp = species.get(payload.get("race") or "")
-        if not sp:
+        if custom:  # Campfire / homebrew race: no lineage; 2024 ignores racial ability bonuses
+            race_index = custom[0]
+        elif not sp:
             raise RulesError("choose a species")
-        race_index = payload["race"]
-        if payload.get("subrace"):
+        else:
+            race_index = payload["race"]
+        if custom:
+            pass  # no lineage to check
+        elif payload.get("subrace"):
             sub = next((s for s in sp.get("subspecies", []) if s["index"] == payload["subrace"]), None)
             if not sub:
                 raise RulesError("that lineage doesn't belong to the species")
@@ -580,6 +640,10 @@ def create(payload: dict, roll_sets: list | None = None, starting_level: int = 1
             raise RulesError("ability scores can't go above 20")
         if bg.get("origin_feat"):
             feats.append(bg["origin_feat"])
+    elif custom:
+        race_index = custom[0]
+        for a, v in (custom_race.get("ability_bonuses") or {}).items():
+            scores[a] += int(v)
     else:
         race = srd.races().get(payload.get("race") or "")
         if not race:
@@ -616,7 +680,7 @@ def create(payload: dict, roll_sets: list | None = None, starting_level: int = 1
     picks = [s for s in picks if s not in bg["skills"]]
     if len(picks) + len(overlap) != sc["count"] or (not picks and sc["count"]):
         raise RulesError(f"choose {sc['count']} class skills")
-    skill_profs = sorted(set(picks) | set(bg["skills"]))
+    skill_profs = sorted(set(picks) | set(bg["skills"]) | {s for s in (custom_race or {}).get("skills") or [] if s in SKILLS})
     if "Skilled" in feats:
         extra_sk = [s for s in SKILLS if s not in skill_profs][:3]
         skill_profs = sorted(set(skill_profs) | set(extra_sk))
@@ -663,6 +727,9 @@ def create(payload: dict, roll_sets: list | None = None, starting_level: int = 1
         "slots_used": {}, "pact_used": 0, "hit_dice_used": 0, "temp_hp": 0, "concentration": None,
         "source": "creator", "issues": [],
     }
+    if homebrew_snap:  # snapshot: later edits or deletion of the library entry don't touch the character
+        sheet["homebrew_race"] = {"entry_id": homebrew.get("id"), "name": homebrew_snap["name"]}
+        sheet["race_data"] = homebrew_snap
     for key, qty, equipped in opt["items"]:
         if srd.item(key):
             sheet["inventory"].append(make_item(key, qty, equipped))
@@ -1364,6 +1431,7 @@ def view(char_id: str, owner_id: str, game_id: str | None, sheet: dict) -> dict:
     return {
         "id": char_id, "name": sheet["name"], "owner_id": owner_id, "game_id": game_id, "ruleset": ruleset,
         "race": ri["name"], "subrace": subrace_name(sheet),
+        "race_source": race_source(sheet), "race_traits": race_traits(sheet),
         "class": cls["name"], "subclass": subclass,
         "background": rules.BACKGROUNDS.get(sheet.get("background") or "", {}).get("name", sheet.get("background")),
         "alignment": sheet.get("alignment"), "backstory": sheet.get("backstory", ""), "color": sheet.get("color"),

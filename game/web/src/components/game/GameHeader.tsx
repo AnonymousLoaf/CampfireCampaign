@@ -3,6 +3,7 @@ import { api } from "../../api/client";
 import { navigate } from "../../router";
 import { PHASE_LABEL, formatCountdown, useNow } from "../../util/format";
 import { useGame } from "./gameContext";
+import InviteByEmail from "./InviteByEmail";
 
 export default function GameHeader({ onSettings, onTv }: { onSettings: () => void; onTv: () => void }) {
   const { view, gameId, run } = useGame();
@@ -54,6 +55,7 @@ export default function GameHeader({ onSettings, onTv }: { onSettings: () => voi
             Invite code <code className="code big">{view.game.invite_code}</code>
           </span>
         )}
+        {view.game.status === "lobby" && view.me.role !== "spectator" && <InviteByEmail gameId={gameId} />}
         {host && view.game.status === "lobby" && (
           <button className="btn primary" onClick={() => void run(() => api.start(gameId))}>
             Start game

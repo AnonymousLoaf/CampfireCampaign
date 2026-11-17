@@ -34,7 +34,8 @@ export default function CustomPicker({
     }
   };
 
-  const available = (lib ?? []).filter((e) => !attached.has(e.id));
+  // homebrew races are picked in the character creator, not attached afterwards
+  const available = (lib ?? []).filter((e) => !attached.has(e.id) && e.kind !== "race");
 
   return (
     <div className="custom-picker">

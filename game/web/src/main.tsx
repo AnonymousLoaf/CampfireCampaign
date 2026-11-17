@@ -8,6 +8,7 @@ import "./styles/game.css";
 import "./styles/m2.css";
 import "./styles/m3.css";
 import "./styles/m4.css";
+import "./styles/chat.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
