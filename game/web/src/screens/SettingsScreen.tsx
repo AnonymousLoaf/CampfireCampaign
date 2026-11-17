@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Me } from "../api/types";
-import DiceRoller, { showDice } from "../components/DiceRoller";
+import DiceRoller, { getDiceProblem, onDiceProblem, showDice } from "../components/DiceRoller";
 import SettingsPanel from "../components/lobby/SettingsPanel";
 import { navigate } from "../router";
 import { usePrefs } from "../util/prefs";
@@ -12,6 +12,8 @@ function DiceTray({ me }: { me: Me }) {
   const [sides, setSides] = useState<(typeof SIDES)[number]>(20);
   const [count, setCount] = useState(1);
   const [prefs, setPrefs] = usePrefs();
+  const [problem, setProblem] = useState(getDiceProblem());
+  useEffect(() => onDiceProblem(setProblem), []);
   const roll = (dice: { sides: number; value: number }[], label: string) => {
     showDice({
       kind: "damage",
@@ -30,6 +32,7 @@ function DiceTray({ me }: { me: Me }) {
         <h2>Test dice</h2>
       </div>
       <p className="muted small">Throw some practice dice to see how they roll on this device. Nothing here counts in a game.</p>
+      {problem && <div className="small error-text">The 3D dice can't run on this device: {problem}. Only the result is shown.</div>}
       {!prefs.dice && (
         <div className="small error-text">
           Dice animation is switched off below (Sound &amp; narration → Animated dice), so only the result shows.

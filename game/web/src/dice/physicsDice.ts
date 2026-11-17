@@ -459,7 +459,7 @@ export class DiceTable {
 export function webglAvailable(): boolean {
   try {
     const c = document.createElement("canvas");
-    return !!(c.getContext("webgl2") || c.getContext("webgl"));
+    return !!c.getContext("webgl2"); // three.js needs WebGL 2
   } catch {
     return false;
   }

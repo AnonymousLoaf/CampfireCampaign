@@ -23,6 +23,21 @@ export interface DiceShow {
 
 const subs = new Set<(d: DiceShow) => void>();
 
+/** Why the 3D dice couldn't run on this device (null = they work, or haven't been tried yet). */
+let diceProblem: string | null = null;
+const problemSubs = new Set<(p: string | null) => void>();
+export function getDiceProblem(): string | null {
+  return diceProblem;
+}
+export function onDiceProblem(fn: (p: string | null) => void): () => void {
+  problemSubs.add(fn);
+  return () => problemSubs.delete(fn);
+}
+function setDiceProblem(p: string | null) {
+  diceProblem = p;
+  problemSubs.forEach((f) => f(p));
+}
+
 /** Queue a roll: real 3D dice are thrown across the screen for everyone and land on the server's results. */
 export function showDice(d: DiceShow): void {
   if (!getPrefs().dice) return;
@@ -134,7 +149,7 @@ export default function DiceRoller({ variant = "game" }: { variant?: "game" | "t
       try {
         if (!table.current) {
           const mod = await import("../dice/physicsDice");
-          if (!mod.webglAvailable()) throw new Error("no WebGL");
+          if (!mod.webglAvailable()) throw new Error("this browser has no WebGL 2 (3D graphics) — try updating it, or turning on hardware acceleration");
           if (!alive || !host.current) return;
           table.current = new mod.DiceTable(host.current);
         }
@@ -142,8 +157,9 @@ export default function DiceRoller({ variant = "game" }: { variant?: "game" | "t
         const still = prefersReducedMotion() && getPrefs().diceMotion !== "always"
           && !new URLSearchParams(location.search).has("forcemotion");
         finish(await table.current.throw(specs, still));
-      } catch {
-        failed.current = true; // no WebGL here: just show the result
+      } catch (e) {
+        failed.current = true; // no 3D here: just show the result
+        setDiceProblem(e instanceof Error ? e.message : String(e));
         finish(centre());
       }
     })();
