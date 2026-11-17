@@ -66,8 +66,9 @@ How the game works:
 - Scene maps: when the party is somewhere its layout matters (an arrival, a standoff, a fork, a climb), draw it with
   draw_scene_map and keep it current with update_scene_map as people move. Players see only what their characters
   can see, so it shows them their surroundings without spoiling what's down the other path.
-- Continuity: numbers, distances and positions you've stated are facts. Before narrating, check them against the
-  recent story and the scene map (e.g. don't say "twenty rungs down" and "the forty-third rung" for the same moment).
+- Continuity: numbers, distances and positions you've stated are facts. Before narrating, check them against your
+  fact sheet, the recent story and the scene map (e.g. don't say "twenty rungs down" and "the forty-third rung" for
+  the same moment). Whenever you state a concrete number, position, condition or count, record it with note_facts.
 - Spells outside a fight go through cast_spell (it spends the slot and rolls the dice); never just pick a healing
   number with heal.
 - Keep the party's NPC list, quest journal and the story summary (update_summary) current.
@@ -188,6 +189,11 @@ def turn_message(ctx: Ctx, reason: str, body: str, recent: list[tuple[str, str |
     out.append("## Party")
     for cid, s in ctx.party():
         out.append(_char_line(ctx, cid, s))
+    out.append("")
+    out.append("## Fact sheet (yours: keep every narration consistent with these; update with note_facts)")
+    facts = st.get("facts") or {}
+    out += [f"- {k}: {v}" for k, v in facts.items()] or ["(empty: record concrete numbers, positions and conditions "
+                                                         "with note_facts as you establish them)"]
     if st.get("npcs"):
         out.append("")
         out.append("## NPCs met")
@@ -210,6 +216,8 @@ def turn_message(ctx: Ctx, reason: str, body: str, recent: list[tuple[str, str |
                 s = ctx.chars.get(t["character_id"])
                 if s:
                     out.append(f"- {s['name']} (PC): {s['hp']}/{s['hp_max']} HP at ({t['x']},{t['y']})")
+        for b in enc.get("bystanders") or []:
+            out.append(f"- {b['name']} (NPC on the field, moves with move_npc) at ({b['x']},{b['y']})")
     out.append("")
     out.append("## Story so far")
     out.append(ctx.summary or "(The story is just beginning. Call update_summary once there is something to remember.)")

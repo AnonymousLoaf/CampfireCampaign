@@ -45,6 +45,19 @@ TOOLS: list[dict] = [
                       "description": "How far apart the sides start: close = 10-20 ft (a standoff), near = 30-40 ft, "
                                      "far = opposite ends of the map (default)"}},
          "required": ["monsters", "terrain"]}},
+    {"name": "move_npc",
+     "description": "Move a friendly NPC on the battle map (they aren't combatants, but they act in the story: Pim "
+                    "crawls for cover, Vane steps in front of the party, a guard runs for help). Call it whenever your "
+                    "narration moves one. Give a square (x, y), or `toward` / `away_from` a creature; they move up to "
+                    "`feet` (default 30) around walls and others. `enter` adds an NPC who arrives (give x, y); `leave` "
+                    "takes one off the map (fled, carried off, gone).",
+     "input_schema": {"type": "object", "properties": {
+         "name": {"type": "string"}, "x": {"type": "integer"}, "y": {"type": "integer"},
+         "toward": {"type": "string", "description": "creature name"},
+         "away_from": {"type": "string", "description": "creature name"},
+         "feet": {"type": "integer", "minimum": 5, "maximum": 120},
+         "enter": {"type": "boolean"}, "leave": {"type": "boolean"}},
+         "required": ["name"]}},
     {"name": "end_combat",
      "description": "End the current fight without a victory (the enemies flee or surrender, or the party escapes).",
      "input_schema": {"type": "object", "properties": {"reason": {"type": "string"}}, "required": ["reason"]}},
@@ -256,7 +269,19 @@ TOOLS: list[dict] = [
      "description": "Replace the running story summary you'll be given in future turns. Keep it under 300 words: key "
                     "events, open threads, secrets, NPC attitudes. Update it whenever something important changes.",
      "input_schema": {"type": "object", "properties": {"summary": {"type": "string"}}, "required": ["summary"]}},
+    {"name": "note_facts",
+     "description": "Your fact sheet: short facts you must keep consistent, shown to you every turn. Record anything "
+                    "concrete as soon as you state it: counts and distances ('Shaft: 60 rungs; rung 43 flinches'), "
+                    "where people are ('Teft: rung 20, Pim tied to his back'), conditions and clocks ('Pim: legs "
+                    "bone-white to the knee, spreading', 'Season pressure: 1/5'), who carries what. Change a fact by "
+                    "setting it again; remove it when it stops mattering. Players never see this.",
+     "input_schema": {"type": "object", "properties": {
+         "set": {"type": "object", "additionalProperties": {"type": "string"},
+                 "description": "Facts to add or change, as {short name: fact}"},
+         "remove": {"type": "array", "items": {"type": "string"}, "description": "Names of facts to drop"}},
+         "required": []}},
 ]
+FACTS_MAX = 40
 
 TOOL_NAMES = [t["name"] for t in TOOLS]
 
@@ -363,6 +388,8 @@ class ToolBox:
                                   self.ctx.settings.get("death_rule", "standard"), seed=random.randrange(1 << 30),
                                   ruleset=ruleset, distance=distance if distance in bm.DISTANCES else "far",
                                   premade=premade, pc_spots=pc_spots, foe_spots=foe_spots, bystanders=bystanders)
+        if premade:
+            enc["from_scene"] = True
         self.ctx.state["encounter"] = enc
         self.ctx.log_lines(lines)
         self.started_combat = True
@@ -761,6 +788,60 @@ class ToolBox:
         names = ", ".join(self.ctx.chars[c]["name"] for c in self.spotlight)
         return f"ok: the next round is {names}'s call; the others can still act or pass"
 
+    def t_move_npc(self, name: str, x: int | None = None, y: int | None = None, toward: str | None = None,
+                   away_from: str | None = None, feet: int = 30, enter: bool = False, leave: bool = False) -> str:
+        enc = self.ctx.encounter
+        if not enc or enc.get("outcome"):
+            raise RulesError("no fight is on; outside fights move NPCs with update_scene_map")
+        bys = enc.setdefault("bystanders", [])
+        key = name.strip().lower()
+        b = next((o for o in bys if o["name"].lower() == key), None) or \
+            next((o for o in bys if key in o["name"].lower() or o["name"].lower() in key), None)
+        occupied = combat.occupied(enc, self.ctx.chars)
+        if enter:
+            if b:
+                raise RulesError(f"{b['name']} is already on the map")
+            if x is None or y is None:
+                raise RulesError("give x and y for where they arrive")
+            spot = combat._spots_near(enc, [(int(x), int(y))], occupied)
+            if not spot:
+                raise RulesError("there's no free square for them")
+            bys.append({"name": name.strip()[:40], "x": spot[0][0], "y": spot[0][1]})
+            return f"{name.strip()} enters at {spot[0]}."
+        if not b:
+            names = ", ".join(o["name"] for o in bys) or "none"
+            raise RulesError(f"no NPC called {name!r} on the map (on the map: {names}); use enter to add one")
+        if leave:
+            bys.remove(b)
+            return f"{b['name']} leaves the map."
+        start = (b["x"], b["y"])
+        budget = max(5, min(120, int(feet or 30)))
+        opts = bm.reachable(enc, start, budget, occupied - {start})
+        if toward or away_from:
+            kind, tid, o = self._target(toward or away_from)
+            if kind == "pc":  # a character's sheet has no position: use their token
+                o = enc["tokens"].get(f"pc-{tid}") or {}
+            if "x" not in o:
+                raise RulesError(f"{toward or away_from} isn't on the battle map")
+            goal = (o["x"], o["y"])
+            if toward:
+                dest = min(opts, key=lambda p: (max(0, bm.distance_ft(p, goal) - 5), opts[p]))
+            else:
+                dest = max(opts, key=lambda p: (bm.distance_ft(p, goal), -opts[p]))
+        elif x is not None and y is not None:
+            goal = (int(x), int(y))
+            dest = min(opts, key=lambda p: (bm.distance_ft(p, goal), opts[p]))
+        else:
+            raise RulesError("say where: x and y, toward, or away_from")
+        b["x"], b["y"] = dest
+        sm = self.ctx.state.get("scene_map")
+        if sm and enc.get("from_scene"):  # the fight is on the scene map: keep it in step
+            for n in sm.get("npcs", []):
+                if n["name"].lower() == b["name"].lower():
+                    n["x"], n["y"] = dest
+        short = "" if (x is None or (int(x), int(y)) == dest) else " (as far as they could get)"
+        return f"{b['name']} moves to {dest}{short}, {opts[dest]} ft."
+
     def t_rest(self, kind: str) -> str:
         return rest_party(self.ctx, kind)
 
@@ -814,6 +895,24 @@ class ToolBox:
     def t_update_summary(self, summary: str) -> str:
         self.ctx.summary = summary[:4000]
         return "Summary saved."
+
+    def t_note_facts(self, set: dict | None = None, remove: list | None = None) -> str:  # noqa: A002 (tool arg name)
+        facts: dict = self.ctx.state.setdefault("facts", {})
+        for k in remove or []:
+            facts.pop(str(k).strip()[:60], None)
+        for k, v in (set or {}).items():
+            k = str(k).strip()[:60]
+            if not k:
+                continue
+            if v is None or str(v).strip() == "":
+                facts.pop(k, None)
+                continue
+            facts.pop(k, None)  # re-insert so the newest facts sit at the end
+            facts[k] = str(v).strip()[:200]
+        while len(facts) > FACTS_MAX:
+            facts.pop(next(iter(facts)))
+        return f"Fact sheet: {len(facts)} facts." + (" (Oldest dropped: keep it to what still matters.)"
+                                                      if len(facts) >= FACTS_MAX else "")
 
 
 def _check_bonus(s: dict, check: str) -> tuple[str, int]:
