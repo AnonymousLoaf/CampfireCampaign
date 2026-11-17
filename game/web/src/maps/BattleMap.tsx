@@ -147,19 +147,15 @@ export default function BattleMap({
         if (c === " ") continue;
         if (c === "v") {
           // Scene maps: open air / a drop the party can see into (unlike blank fog).
-          const g = ctx.createLinearGradient(px, py, px, py + cell);
-          g.addColorStop(0, "#1b2230");
-          g.addColorStop(1, "#141a24");
-          ctx.fillStyle = g;
+          // Flat and dark with no texture or grid, so it reads as empty space (not floor, not rungs).
+          ctx.fillStyle = "#121722";
           ctx.fillRect(px, py, cell, cell);
-          ctx.strokeStyle = "rgba(140,170,210,0.10)";
-          ctx.lineWidth = 1;
-          ctx.beginPath();
-          ctx.moveTo(px + cell * 0.2, py + cell * 0.3);
-          ctx.lineTo(px + cell * 0.45, py + cell * 0.3);
-          ctx.moveTo(px + cell * 0.55, py + cell * 0.7);
-          ctx.lineTo(px + cell * 0.8, py + cell * 0.7);
-          ctx.stroke();
+          // Where the drop meets solid ground, shade the edge so the lip is visible.
+          ctx.fillStyle = "rgba(0,0,0,0.35)";
+          const row2 = encounter.cells;
+          if (y > 0 && !"v ".includes(row2[y - 1]?.[x] ?? " ")) ctx.fillRect(px, py, cell, Math.max(2, cell * 0.12));
+          if (x > 0 && !"v ".includes(row[x - 1] ?? " ")) ctx.fillRect(px, py, Math.max(2, cell * 0.12), cell);
+          if (x < w - 1 && !"v ".includes(row[x + 1] ?? " ")) ctx.fillRect(px + cell - Math.max(2, cell * 0.12), py, Math.max(2, cell * 0.12), cell);
           continue;
         }
         ctx.fillStyle = (x + y) % 2 ? style.floor : style.floorAlt;
@@ -312,7 +308,11 @@ export default function BattleMap({
           ? `${cap(encounter.difficult ?? "difficult terrain")} — difficult terrain (costs double movement)`
           : hoverCell === "D"
             ? "Door"
-            : null;
+            : hoverCell === "v"
+              ? "Open air: a drop"
+              : hoverCell === "="
+                ? "Ladder / rungs"
+                : null;
 
   return (
     <div className="map-wrap" ref={wrapRef}>
