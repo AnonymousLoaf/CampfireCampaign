@@ -80,6 +80,13 @@
 .live-toggle {
   position: relative;
 }
+.invite-popover {
+  width: min(320px, calc(100vw - 32px));
+}
+.invite-popover input {
+  flex: 1;
+  min-width: 0;
+}
 .btn.live {
   border-color: #b3261e;
   color: #ffb3ab;

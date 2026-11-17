@@ -7,14 +7,16 @@ import CharacterPicker from "./CharacterPicker";
 
 export default function JoinGameModal({
   characters,
+  initialCode,
   onClose,
   onJoined,
 }: {
   characters: CharacterView[];
+  initialCode?: string;
   onClose: () => void;
   onJoined: (id: string) => void;
 }) {
-  const [code, setCode] = useState("");
+  const [code, setCode] = useState(initialCode ?? "");
   const [mode, setMode] = useState<"play" | "watch">("play");
   const [charId, setCharId] = useState(characters[0]?.id ?? "");
   const [join, busy, error] = useAction(async () => {

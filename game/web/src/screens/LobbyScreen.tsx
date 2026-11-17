@@ -17,10 +17,12 @@ export default function LobbyScreen({
   me,
   onMeChange,
   onLogout,
+  joinCode,
 }: {
   me: Me;
   onMeChange: (m: Me) => void;
   onLogout: () => void;
+  joinCode?: string; // from an emailed invite link (#/join/CODE)
 }) {
   const [games, setGames] = useState<GameSummary[] | null>(null);
   const [characters, setCharacters] = useState<CharacterView[] | null>(null);
@@ -47,6 +49,17 @@ export default function LobbyScreen({
     void load();
     return subscribe("lobby", () => void load());
   }, [load]);
+
+  // An invite link opens the join dialog with the code filled in, once characters have loaded.
+  const charactersLoaded = characters !== null;
+  useEffect(() => {
+    if (joinCode && charactersLoaded) setModal("join");
+  }, [joinCode, charactersLoaded]);
+
+  const closeModal = () => {
+    setModal(null);
+    if (joinCode) navigate({ name: "lobby" });
+  };
 
   const deleteCharacter = async (id: string) => {
     if (!window.confirm("Delete this character? This can't be undone.")) return;
@@ -222,7 +235,12 @@ export default function LobbyScreen({
         />
       )}
       {modal === "join" && (
-        <JoinGameModal characters={freeCharacters} onClose={() => setModal(null)} onJoined={(id) => navigate({ name: "game", id })} />
+        <JoinGameModal
+          characters={freeCharacters}
+          initialCode={joinCode}
+          onClose={closeModal}
+          onJoined={(id) => navigate({ name: "game", id })}
+        />
       )}
       {modal === "import" && (
         <ImportCharacterModal

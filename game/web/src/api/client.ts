@@ -1,6 +1,7 @@
 import type {
   AbilityRoll,
   CharacterView,
+  ChatMessage,
   CreateCharacter,
   CreatorOptions,
   CustomEntry,
@@ -135,6 +136,15 @@ export const api = {
     return get<{ entries: LogEntry[]; has_more: boolean }>(`/games/${id}/log?${q.toString()}`);
   },
   seen: (id: string, log_id: number | string) => post<Ok>(`/games/${id}/seen`, { log_id }),
+  // table chat
+  chat: (id: string, before_id?: number) =>
+    get<{ messages: ChatMessage[]; has_more: boolean }>(
+      `/games/${id}/chat?limit=50` + (before_id !== undefined ? `&before_id=${before_id}` : ""),
+    ),
+  chatPost: (id: string, text: string) => post<ChatMessage>(`/games/${id}/chat`, { text }),
+  chatEdit: (id: string, mid: number, text: string) => patch<ChatMessage>(`/games/${id}/chat/${mid}`, { text }),
+  chatDelete: (id: string, mid: number) => del<ChatMessage>(`/games/${id}/chat/${mid}`),
+  chatSeen: (id: string, message_id: number) => post<Ok>(`/games/${id}/chat/seen`, { message_id }),
   recap: (id: string) => post<{ text: string }>(`/games/${id}/recap`),
   storySummary: (id: string) => post<{ text: string; updated_at: string | null; upto_id: number }>(`/games/${id}/story`),
   view: (id: string, character_id?: string | null) =>
@@ -200,5 +210,6 @@ export const api = {
     post<Ok>(`/games/${id}/combat/end-turn`, withChar({}, character_id)),
   forceResolve: (id: string) => post<Ok>(`/games/${id}/force-resolve`),
   nudge: (id: string, user_id: string) => post<Ok>(`/games/${id}/nudge`, { user_id }),
+  inviteByEmail: (id: string, email: string) => post<Ok>(`/games/${id}/invite`, { email }),
   retryDm: (id: string) => post<Ok>(`/games/${id}/retry-dm`),
 };

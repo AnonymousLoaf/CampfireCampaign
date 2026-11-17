@@ -34,4 +34,13 @@ DEFAULT_MODEL = "claude-opus-5-5"
 
 
 def claude_cli_available() -> bool:
-    return shutil.which("claude") is not None
+    """True if the Agent SDK can launch Claude Code: either `claude` on PATH, or the
+    CLI that ships inside the claude-agent-sdk package (which the SDK prefers anyway)."""
+    if shutil.which("claude") is not None:
+        return True
+    try:
+        import claude_agent_sdk
+    except ImportError:
+        return False
+    name = "claude.exe" if os.name == "nt" else "claude"
+    return (Path(claude_agent_sdk.__file__).parent / "_bundled" / name).is_file()

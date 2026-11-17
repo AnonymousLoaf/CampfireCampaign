@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
 import type { GameView, Me } from "../api/types";
-import { subscribe } from "../api/ws";
+import { emitChat, subscribe } from "../api/ws";
+import ChatPanel from "../components/game/ChatPanel";
 import { navigate } from "../router";
 import { GameContext, controlsOf, type GameCtx } from "../components/game/gameContext";
 import GameHeader from "../components/game/GameHeader";
@@ -25,7 +26,7 @@ import { AutoReadToggle, SoundChip } from "../components/atmosphere/AudioControl
 import { useGameEffects } from "../components/atmosphere/useGameEffects";
 import DiceRoller from "../components/DiceRoller";
 
-type MobileTab = "story" | "map" | "party" | "sheet";
+type MobileTab = "story" | "chat" | "map" | "party" | "sheet";
 
 export default function GameScreen({ gameId, me }: { gameId: string; me: Me }) {
   const [view, setView] = useState<GameView | null>(null);
@@ -54,7 +55,10 @@ export default function GameScreen({ gameId, me }: { gameId: string; me: Me }) {
 
   useEffect(() => {
     void load();
-    return subscribe(gameId, () => void load());
+    return subscribe(gameId, (m) => {
+      if (m.type === "chat") emitChat(m.message);
+      void load(); // also refreshes the chat unread badge
+    });
   }, [gameId, load]);
 
   const showToast = (msg: string) => {
@@ -140,7 +144,8 @@ function GameLoaded({
   const [levelUpFor, setLevelUpFor] = useState<string | null>(null);
   const isMobile = useIsMobile();
   const [mobileTab, setMobileTab] = useState<MobileTab>("story");
-  const [feedTab, setFeedTab] = useState<"live" | "story">("live");
+  const [feedTab, setFeedTab] = useState<"live" | "story" | "chat">("live");
+  const chatUnseen = view.me.chat_unseen ?? 0;
   const spectator = view.me.role === "spectator";
   useGameEffects(view);
   const portraits = useMemo(() => {
@@ -323,8 +328,14 @@ function GameLoaded({
         <button className={feedTab === "story" ? "active" : ""} onClick={() => setFeedTab("story")}>
           Story so far
         </button>
+        <button className={feedTab === "chat" ? "active" : ""} onClick={() => setFeedTab("chat")} title="Table talk — the DM can't see it">
+          💬 Chat
+          {chatUnseen > 0 && <span className="count">{chatUnseen}</span>}
+        </button>
       </div>
-      {feedTab === "live" ? (
+      {feedTab === "chat" ? (
+        <ChatPanel gameId={gameId} view={view} onSeen={refresh} />
+      ) : feedTab === "live" ? (
         <>
           <CatchUp onMarkRead={() => markSeen(true)} />
           <StoryFeed
@@ -373,6 +384,7 @@ function GameLoaded({
 
   const mobileTabs: { id: MobileTab; label: string; icon: string; badge?: number | string }[] = [
     { id: "story", label: "Story", icon: "📜", badge: (view.me.unseen_count ?? 0) > 0 ? view.me.unseen_count : undefined },
+    { id: "chat", label: "Chat", icon: "💬", badge: chatUnseen > 0 ? chatUnseen : undefined },
     { id: "map", label: enc ? "Battle" : "Map", icon: enc ? "⚔" : "🗺", badge: myTurn ? "!" : undefined },
     { id: "party", label: "Party", icon: "👥" },
     {
@@ -398,11 +410,16 @@ function GameLoaded({
           <>
             <div className={`mobile-body mtab-${mobileTab}`}>
               {mobileTab === "story" && <section className="game-right">{feedEl}</section>}
+              {mobileTab === "chat" && (
+                <section className="game-right">
+                  <ChatPanel gameId={gameId} view={view} onSeen={refresh} />
+                </section>
+              )}
               {mobileTab === "map" && mapEl}
               {mobileTab === "party" && <aside className="game-left">{partyEl}</aside>}
               {mobileTab === "sheet" && <aside className="game-left">{sheetEl}</aside>}
             </div>
-            <div className="mobile-composer">{composer}</div>
+            {mobileTab !== "chat" && <div className="mobile-composer">{composer}</div>}
             <nav className="mobile-tabbar">
               {mobileTabs.map((t) => (
                 <button key={t.id} className={mobileTab === t.id ? "active" : ""} onClick={() => setMobileTab(t.id)}>

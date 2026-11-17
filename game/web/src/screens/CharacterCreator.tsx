@@ -6,6 +6,10 @@ import {
   type AbilityMap,
   type AbilityRoll,
   type CreatorOptions,
+  type CustomEntry,
+  type HomebrewRaceData,
+  type Race,
+  type RaceTrait,
   type Ruleset,
 } from "../api/types";
 import ErrorText, { useAction } from "../components/ErrorText";
@@ -29,6 +33,40 @@ function magicInitiateList(feat: { name?: string | null; list?: string | null } 
   const m = /\(([^)]+)\)/.exec(featName);
   return (m ? m[1] : "wizard").trim().toLowerCase();
 }
+
+/** One of my homebrew "race" entries as a creator race option (2014 applies its ability bonuses; 2024 ignores them). */
+function homebrewRace(e: CustomEntry, ruleset: Ruleset): Race {
+  const d = (e.data ?? {}) as Partial<HomebrewRaceData>;
+  const dv = Number(d.darkvision) || 0;
+  const traits: RaceTrait[] = [
+    ...(dv
+      ? [{ name: `Darkvision (${dv} ft.)`, description: `You see in dim light within ${dv} ft as if it were bright light, and in darkness as if it were dim light.` }]
+      : []),
+    ...(Array.isArray(d.traits) ? d.traits : []).map((t) => ({ name: t.name, description: t.text })),
+  ];
+  return {
+    index: `homebrew:${e.id}`,
+    name: e.name,
+    speed: d.speed ?? 30,
+    size: d.size ?? "Medium",
+    ability_bonuses: ruleset === "2014" ? d.ability_bonuses ?? {} : {},
+    traits: traits.map((t) => t.name),
+    trait_details: traits,
+    languages: Array.isArray(d.languages) ? d.languages : [],
+    subraces: [],
+    ability_choices: null,
+    ancestries: null,
+    group: "homebrew",
+    source: "Homebrew",
+    concept: e.description,
+  };
+}
+
+const RACE_GROUPS: { group: "srd" | "campfire" | "homebrew"; title: string | null; note: string | null }[] = [
+  { group: "srd", title: null, note: null },
+  { group: "campfire", title: "More races", note: "Original Campfire Campaign races — not from the SRD, usable with either rules edition." },
+  { group: "homebrew", title: "My homebrew races", note: "From My content in the lobby. Only you can pick these." },
+];
 
 export default function CharacterCreator({ onDone, onCancel }: { onDone: () => void; onCancel: () => void }) {
   const [ruleset, setRuleset] = useState<Ruleset>("2014");
@@ -66,6 +104,14 @@ export default function CharacterCreator({ onDone, onCancel }: { onDone: () => v
   const [masteries, setMasteries] = useState<string[]>([]);
   const [miCantrips, setMiCantrips] = useState<string[]>([]);
   const [miSpell, setMiSpell] = useState("");
+  const [homebrewEntries, setHomebrewEntries] = useState<CustomEntry[]>([]);
+
+  useEffect(() => {
+    api
+      .customList()
+      .then((list) => setHomebrewEntries(list.filter((e) => e.kind === "race")))
+      .catch(() => setHomebrewEntries([]));
+  }, []);
 
   useEffect(() => {
     setOpts(null);
@@ -106,7 +152,11 @@ export default function CharacterCreator({ onDone, onCancel }: { onDone: () => v
     setStep("Race");
   };
 
-  const raceObj = opts?.races.find((r) => r.index === race) ?? null;
+  const allRaces: Race[] = useMemo(
+    () => [...(opts?.races ?? []), ...homebrewEntries.map((e) => homebrewRace(e, ruleset))],
+    [opts, homebrewEntries, ruleset],
+  );
+  const raceObj = allRaces.find((r) => r.index === race) ?? null;
   const subObj = raceObj?.subraces.find((s) => s.index === subrace) ?? null;
   const clsObj = opts?.classes.find((c) => c.index === cls) ?? null;
   const bgObj = opts?.backgrounds.find((b) => b.index === background) ?? null;
@@ -228,9 +278,11 @@ export default function CharacterCreator({ onDone, onCancel }: { onDone: () => v
 
   const [create, creating, createErr] = useAction(async () => {
     if (!baseScores) throw new Error("Ability scores are incomplete.");
+    const homebrewId = race.startsWith("homebrew:") ? race.slice("homebrew:".length) : null;
     await api.createCharacter({
       name: name.trim(),
-      race,
+      race: homebrewId ? "homebrew" : race,
+      ...(homebrewId ? { homebrew_race_id: homebrewId } : {}),
       subrace,
       class: cls,
       background,
@@ -340,31 +392,41 @@ export default function CharacterCreator({ onDone, onCancel }: { onDone: () => v
                 </span>
               </div>
               <h2>{is2024 ? "Choose your species" : "Choose your race"}</h2>
-              <div className="choice-grid">
-                {opts.races.map((r) => (
-                  <button
-                    key={r.index}
-                    className={`choice ${race === r.index ? "selected" : ""}`}
-                    onClick={() => {
-                      if (race !== r.index) {
-                        setBonusAbilities([]);
-                        setAncestry("");
-                      }
-                      setRace(r.index);
-                      setSubrace(r.subraces.length === 1 ? r.subraces[0].index : null);
-                    }}
-                  >
-                    <strong>{r.name}</strong>
-                    <span className="muted small">
-                      {Object.entries(r.ability_bonuses)
-                        .map(([k, v]) => `${k} ${signed(v as number)}`)
-                        .join(", ") || "—"}{" "}
-                      · Speed {r.speed} ft
-                    </span>
-                    <span className="small">{r.traits.slice(0, 4).join(", ")}</span>
-                  </button>
-                ))}
-              </div>
+              {RACE_GROUPS.map(({ group, title, note }) => {
+                const list = allRaces.filter((r) => (r.group ?? "srd") === group);
+                if (list.length === 0) return null;
+                return (
+                  <div key={group}>
+                    {title && <h3>{title}</h3>}
+                    {note && <p className="muted small">{note}</p>}
+                    <div className="choice-grid">
+                      {list.map((r) => (
+                        <button
+                          key={r.index}
+                          className={`choice ${race === r.index ? "selected" : ""}`}
+                          onClick={() => {
+                            if (race !== r.index) {
+                              setBonusAbilities([]);
+                              setAncestry("");
+                            }
+                            setRace(r.index);
+                            setSubrace(r.subraces.length === 1 ? r.subraces[0].index : null);
+                          }}
+                        >
+                          <strong>{r.name}</strong>
+                          <span className="muted small">
+                            {Object.entries(r.ability_bonuses)
+                              .map(([k, v]) => `${k} ${signed(v as number)}`)
+                              .join(", ") || "—"}{" "}
+                            · Speed {r.speed} ft{r.size === "Small" ? " · Small" : ""}
+                          </span>
+                          <span className="small">{r.concept && group !== "srd" ? r.concept : r.traits.slice(0, 4).join(", ")}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
               {raceObj && raceObj.subraces.length > 0 && (
                 <>
                   <h3>{is2024 ? "Lineage" : "Subrace"}</h3>
@@ -420,10 +482,22 @@ export default function CharacterCreator({ onDone, onCancel }: { onDone: () => v
               )}
               {raceObj && (
                 <div className="detail-box">
-                  <strong>{raceObj.name}</strong> · {raceObj.size} · Languages: {raceObj.languages.join(", ")}
-                  <div className="small">
-                    Traits: <RulesText text={raceObj.traits.join(", ")} />
-                  </div>
+                  <strong>{raceObj.name}</strong> · {raceObj.size} · Languages: {raceObj.languages.join(", ") || "—"}
+                  {raceObj.source && raceObj.group !== "srd" && <span className="muted small"> · {raceObj.source}</span>}
+                  {raceObj.trait_details && raceObj.trait_details.length > 0 ? (
+                    raceObj.trait_details.map((t, i) => (
+                      <div key={`${i}-${t.name}`} className="small">
+                        <strong>{t.name}.</strong> <RulesText text={t.description} />
+                      </div>
+                    ))
+                  ) : (
+                    <div className="small">
+                      Traits: <RulesText text={raceObj.traits.join(", ")} />
+                    </div>
+                  )}
+                  {is2024 && raceObj.group && raceObj.group !== "srd" && (
+                    <div className="muted small">With the 2024 rules this race gives no ability increases; your background does.</div>
+                  )}
                 </div>
               )}
             </div>

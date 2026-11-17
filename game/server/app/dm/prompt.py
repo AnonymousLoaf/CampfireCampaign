@@ -140,6 +140,10 @@ def _char_line(ctx: Ctx, cid: str, s: dict) -> str:
         parts.append("  Feats: " + ", ".join(f["name"] for f in v["feats"]) + ".")
     if v.get("masteries"):
         parts.append("  Weapon masteries: " + ", ".join(f"{m['name']} ({m['mastery']})" for m in v["masteries"]) + ".")
+    if v.get("race_traits"):  # Campfire / homebrew races aren't in the SRD — adjudicate from the trait text
+        src = "homebrew race" if v.get("race_source") == "homebrew" else "Campfire Campaign race"
+        parts.append(f"  {v['race']} traits ({src}): "
+                     + " ".join(f"{t['name']}: {t['description'][:300]}" for t in v["race_traits"][:9]))
     for c in (s.get("custom") or [])[:12]:  # homebrew / content from books the player owns — adjudicate from the text
         desc = c.get("description", "")
         parts.append(f"  Custom {c.get('kind', 'feature')} — {c['name']}: {desc[:400]}{'…' if len(desc) > 400 else ''}")

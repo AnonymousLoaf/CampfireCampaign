@@ -301,6 +301,20 @@ export function CharacterSheet({
           <div className="small pre"><RulesText text={f.description} /></div>
         </details>
       ))}
+      {(c.race_traits ?? []).length > 0 && (
+        <>
+          <h4>
+            {c.race} traits{" "}
+            <span className="muted small">{c.race_source === "homebrew" ? "homebrew" : "Campfire Campaign"}</span>
+          </h4>
+          {(c.race_traits ?? []).map((t, i) => (
+            <details key={`${i}-${t.name}`} className="feature">
+              <summary>{t.name}</summary>
+              <div className="small pre"><RulesText text={t.description} /></div>
+            </details>
+          ))}
+        </>
+      )}
       <CustomEntries c={c} kinds={["feature", "background", "species_trait"]} manage={manage} />
       {c.issues.length > 0 && (
         <>

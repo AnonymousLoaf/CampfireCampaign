@@ -304,6 +304,14 @@ def build_view(db: Session, ctx: Ctx, uid: str | None, tv: bool = False) -> dict
         if last_seen:
             q = q.where(LogEntry.id > last_seen)
         unseen = db.scalar(q) or 0
+    chat_unseen = 0
+    if my_member and not tv:
+        from ..models import ChatMessage
+        q = select(func.count(ChatMessage.id)).where(ChatMessage.game_id == game.id, ChatMessage.deleted.is_(False),
+                                                     ChatMessage.user_id.is_distinct_from(uid))
+        if my_member.last_chat_seen_id:
+            q = q.where(ChatMessage.id > my_member.last_chat_seen_id)
+        chat_unseen = db.scalar(q) or 0
     chars = {cid: ch.view(cid, ctx.char_rows[cid].owner_id, game.id, s) for cid, s in ctx.chars.items()}
     enc0 = ctx.encounter
     if enc0:  # combat-only actions (e.g. an active Spiritual Weapon)
@@ -336,7 +344,8 @@ def build_view(db: Session, ctx: Ctx, uid: str | None, tv: bool = False) -> dict
         "me": {"user_id": uid, "character_id": my_member.character_id if my_member else None, "is_host": is_host,
                "is_speaker": bool(uid) and ctx.settings.get("input_mode") == "single" and uid == ctx.speaker_id(),
                "controls": controls, "role": my_member.role if my_member else None,
-               "last_seen_id": last_seen, "unseen_count": unseen},
+               "last_seen_id": last_seen, "unseen_count": unseen,
+               "last_chat_seen_id": my_member.last_chat_seen_id if my_member else None, "chat_unseen": chat_unseen},
         "tv_url": f"/#/tv/{tv_token}" if (is_host and tv_token) else None,
         "members": members,
         "characters": chars,
