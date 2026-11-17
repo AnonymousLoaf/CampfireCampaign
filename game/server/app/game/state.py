@@ -14,6 +14,7 @@ from ..rules import character as ch
 from ..rules import shop as shop_rules
 from ..rules.character import RulesError
 from ..world import hexmap
+from ..world import scenemap
 from . import combat
 
 DEFAULT_SETTINGS = {
@@ -229,6 +230,10 @@ class Ctx:
         t = p.get("type")
         req = self.required_users()
         if t == "exploration":
+            if p.get("spotlight") and self.settings.get("input_mode") != "single":
+                # the DM asked specific characters; only their players are required (if any of them still can act)
+                focus = [m.user_id for m in self.members if m.character_id in p["spotlight"] and m.user_id in req]
+                req = focus or req
             return [u for u in req if u not in p.get("submissions", {})]
         if t == "shop":
             return [u for u in req if u not in p.get("ready", [])]
@@ -330,6 +335,7 @@ def build_view(db: Session, ctx: Ctx, uid: str | None, tv: bool = False) -> dict
                                  "edited": bool(v.get("edited")), "updated_at": v.get("updated_at")}
                                 for k, v in subs.items()],
         "pending_rolls": p.get("pending_rolls", []), "error": p.get("error"),
+        "spotlight": [ctx.chars[c]["name"] for c in p.get("spotlight") or [] if c in ctx.chars],
     }
     world = hexmap.view(ctx.world) if ctx.world else None
     enc = ctx.encounter
@@ -357,6 +363,8 @@ def build_view(db: Session, ctx: Ctx, uid: str | None, tv: bool = False) -> dict
         "location": ctx.state.get("location") or {"name": "", "settlement_id": None, "description": ""},
         "scene": ctx.state.get("scene") or {"type": "town", "time_of_day": "morning", "weather": "clear", "day": 1, "hour": 8},
         "encounter": combat.view(enc, ctx.chars, controls) if enc else None,
+        "scene_map": scenemap.view(ctx.state["scene_map"], ctx.party(), my_member.character_id if my_member else None)
+                     if ctx.state.get("scene_map") else None,
         "shop": shop_rules.stock_view(shop) if shop else None,
         "npcs": ctx.state.get("npcs", []),
         "quests": ctx.state.get("quests", []),

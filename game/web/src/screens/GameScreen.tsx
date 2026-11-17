@@ -139,7 +139,7 @@ function GameLoaded({
   const controls = useMemo(() => controlsOf(view), [view]);
   const [actingId, setActingId] = useState<string | null>(view.me.character_id ?? controls[0] ?? null);
   const [viewedId, setViewedId] = useState<string | null>(view.me.character_id ?? Object.keys(view.characters)[0] ?? null);
-  const [mapTab, setMapTab] = useState<"world" | "battle">(view.encounter ? "battle" : "world");
+  const [mapTab, setMapTab] = useState<"world" | "scene" | "battle">(view.encounter ? "battle" : view.scene_map ? "scene" : "world");
   const [modal, setModal] = useState<null | "shop" | "settings" | "tv">(null);
   const [levelUpFor, setLevelUpFor] = useState<string | null>(null);
   const isMobile = useIsMobile();
@@ -176,9 +176,15 @@ function GameLoaded({
   // Auto-switch map tab when combat starts / ends (on phones, jump to the map when a fight starts).
   const hasEncounter = !!view.encounter;
   useEffect(() => {
-    setMapTab(hasEncounter ? "battle" : "world");
+    setMapTab(hasEncounter ? "battle" : view.scene_map ? "scene" : "world");
     if (hasEncounter && isMobile && !spectator) setMobileTab("map");
   }, [hasEncounter]); // eslint-disable-line react-hooks/exhaustive-deps
+  // A new scene map (the DM drew one, or cleared it) switches the tab outside fights.
+  const sceneKey = view.scene_map ? `${view.scene_map.title ?? ""}|${view.scene_map.grid.w}x${view.scene_map.grid.h}` : "";
+  useEffect(() => {
+    if (hasEncounter) return;
+    setMapTab((t) => (sceneKey ? "scene" : t === "scene" ? "world" : t));
+  }, [sceneKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Open the shop automatically when a shop phase starts.
   const lastShopPhase = useRef<string | null>(null);
@@ -359,6 +365,11 @@ function GameLoaded({
               <button className={mapTab === "world" ? "active" : ""} onClick={() => setMapTab("world")}>
                 🗺 World map
               </button>
+              {view.scene_map && (
+                <button className={mapTab === "scene" ? "active" : ""} onClick={() => setMapTab("scene")} title="Your immediate surroundings — only what your characters can see">
+                  👁 Scene{view.scene_map.title ? ` · ${view.scene_map.title}` : ""}
+                </button>
+              )}
               <button className={mapTab === "battle" ? "active" : ""} disabled={!enc} onClick={() => setMapTab("battle")}>
                 ⚔ Battle map{enc ? ` · round ${enc.round}` : ""}
               </button>
@@ -375,6 +386,9 @@ function GameLoaded({
                 ) : (
                   <div className="map-empty muted">The world map appears when the game starts.</div>
                 ))}
+              {mapTab === "scene" && view.scene_map && (
+                <BattleMap encounter={view.scene_map} portraits={portraits} viewerTokenId={view.scene_map.my_token_id} interactive />
+              )}
               {mapTab === "battle" && enc && (
                 <BattleMap encounter={enc} portraits={portraits} actorTokenId={enc.turn.actor_id} viewerTokenId={viewerTokenId} interactive />
               )}

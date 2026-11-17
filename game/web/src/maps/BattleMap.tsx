@@ -165,6 +165,12 @@ export default function BattleMap({
       }
     }
 
+    // Scene maps: squares seen before but out of sight now are shaded; unseen squares are already blank.
+    if (encounter.dim?.length) {
+      ctx.fillStyle = "rgba(8,6,5,0.55)";
+      for (const [x, y] of encounter.dim) ctx.fillRect(ox + x * cell, oy + y * cell, cell, cell);
+    }
+
     // Tokens.
     const sorted = [...encounter.tokens].sort((a, b) => (a.hp_state === "dead" ? -1 : 0) - (b.hp_state === "dead" ? -1 : 0));
     for (const t of sorted) drawToken(ctx, t, ox + t.x * cell, oy + t.y * cell, cell * (t.size || 1), {
@@ -229,6 +235,20 @@ export default function BattleMap({
         onMouseLeave={() => setHover(null)}
         style={{ cursor: interactive && hoverTok && hoverTok.hp_state !== "dead" ? "pointer" : "default", touchAction: "manipulation" }}
       />
+      {(encounter.labels ?? []).map((l) => (
+        <span
+          key={`${l.x},${l.y},${l.label}`}
+          className="scene-label"
+          style={{ left: ox + l.x * cell + cell / 2, top: oy + l.y * cell + cell / 2 }}
+        >
+          {l.label}
+        </span>
+      ))}
+      {encounter.title && (
+        <div className="map-overlay top-right">
+          <span className="map-chip small">{encounter.title}</span>
+        </div>
+      )}
       {hoverTok && interactive && !inspected && (
         <div className="map-overlay top-left">
           <span className="map-chip">

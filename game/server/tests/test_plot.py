@@ -73,3 +73,31 @@ def test_host_picks_plot_and_only_dm_and_host_see_it():
         assert host.get(f"/api/games/{gid}/view").json()["plot"] is None
         assert host.put(f"/api/games/{gid}/plot", json={"entry_id": eid}).status_code == 200
         assert host.get(f"/api/games/{gid}/view").json()["plot"]["name"] == "Renamed"
+
+
+def test_spotlight_waits_only_for_the_named_character():
+    from app.dm.tools import ToolBox
+    with TestClient(app):
+        host, player = _client("spothost"), _client("spotplayer")
+        gid = host.post("/api/games", json={"name": "S", "character_id": _character(host, "Ash"),
+                                            "settings": {"ruleset": "2024"}}).json()["id"]
+        code = host.get(f"/api/games/{gid}/view").json()["game"]["invite_code"]
+        player.post("/api/games/join", json={"invite_code": code, "character_id": _character(player, "Bryn")})
+        db = SessionLocal()
+        try:
+            ctx = load(db, gid)
+            ctx.game.status = "active"
+            ctx.open_phase("exploration", "Bryn, now or never.")
+            tb = ToolBox(ctx)
+            assert "Bryn" in tb.call("spotlight", {"characters": ["bryn"]})
+            ctx.phase["spotlight"] = tb.spotlight
+            bryn_uid = next(m.user_id for m in ctx.members if m.role == "player")
+            assert ctx.waiting_on() == [bryn_uid]
+            ctx.save()
+            db.commit()
+        finally:
+            db.close()
+        hv = host.get(f"/api/games/{gid}/view").json()
+        assert hv["phase"]["spotlight"] == ["Bryn"] and hv["phase"]["waiting_on"] == [bryn_uid]
+        assert [g["my_turn"] for g in host.get("/api/games").json() if g["id"] == gid] == [False]
+        assert [g["my_turn"] for g in player.get("/api/games").json() if g["id"] == gid] == [True]

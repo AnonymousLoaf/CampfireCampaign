@@ -569,6 +569,8 @@ export interface Phase {
   opened_at: string | null;
   deadline: string | null;
   waiting_on: string[];
+  /** Exploration: names of the characters the DM asked (only their players are waited on). */
+  spotlight?: string[];
   my_submission: null | { text: string; travel_to: TravelTo; rest?: RestKind; edited?: boolean; updated_at?: string };
   submissions_visible: {
     user_id: string;
@@ -662,6 +664,10 @@ export interface Encounter {
   budget: null | { move_ft: number; action: boolean; bonus: boolean; attacks_left?: number; reaction?: boolean };
   reachable: [number, number][];
   targets: { token_id: string; attack_ids: string[]; spell_indexes: string[] }[];
+  /** Scene maps only: labelled spots, squares seen before but not visible now, and the map's name. */
+  labels?: { label: string; x: number; y: number }[];
+  dim?: [number, number][];
+  title?: string;
 }
 
 export interface ShopStockItem {
@@ -743,6 +749,8 @@ export interface GameView {
   location: { name: string; settlement_id: string | null; description: string } | null;
   scene: { type: string; time_of_day: string; weather: string; day: number; hour: number } | null;
   encounter: Encounter | null;
+  /** The DM's map of the party's immediate surroundings (outside combat), fogged to what the party can see. */
+  scene_map?: Encounter | null;
   shop: Shop | null;
   npcs: { name: string; role: string; attitude: string; notes: string }[];
   quests: { title: string; status: "active" | "done" | "failed"; notes: string }[];

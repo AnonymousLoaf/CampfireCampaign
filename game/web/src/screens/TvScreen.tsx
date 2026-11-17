@@ -115,6 +115,8 @@ function TvLayout({ view }: { view: GameView }) {
         <section className="tv-map">
           {enc ? (
             <BattleMap encounter={enc} interactive={false} actorTokenId={enc.turn.actor_id} portraits={portraits} />
+          ) : view.scene_map ? (
+            <BattleMap encounter={view.scene_map} interactive={false} portraits={portraits} />
           ) : view.world ? (
             <WorldMap world={view.world} interactive={false} autoFit locationName={view.location?.name} />
           ) : (
