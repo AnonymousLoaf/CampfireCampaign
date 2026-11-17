@@ -468,6 +468,27 @@ export class DiceTable {
     });
   }
 
+  /** Do the slow first-time work ahead of a roll: build every die shape, its physics hull, and compile the
+   * shaders (the first frame drawn with a new material is the expensive one). Leaves the table empty. */
+  warmUp(): void {
+    const r = this.dieRadius();
+    const sides: Sides[] = [4, 6, 8, 10, 12, 20];
+    const meshes = sides.map((s) => {
+      const d = this.shape(s, r);
+      const n = s === 4 ? d.verts.length : d.faces.length;
+      const m = new THREE.Mesh(d.geometry, dieMaterials(d, Array.from({ length: n }, (_, k) => k + 1), "#777777"));
+      m.castShadow = true;
+      m.position.set(0, -40, 0); // below the floor: compiled, never seen
+      this.scene.add(m);
+      return m;
+    });
+    this.renderer.compile(this.scene, this.camera);
+    this.renderer.render(this.scene, this.camera);
+    // Keep them (hidden): disposing their materials would release the compiled shaders the real dice reuse.
+    for (const m of meshes) m.visible = false;
+    this.renderer.render(this.scene, this.camera);
+  }
+
   dispose(): void {
     this.disposed = true;
     this.clear();

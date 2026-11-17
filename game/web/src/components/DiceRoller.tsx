@@ -103,6 +103,28 @@ export default function DiceRoller({ variant = "game" }: { variant?: "game" | "t
   const n = useRef(0);
   const busy = useRef(false);
   const hold = useRef<number>(0);
+  const ready = useRef<Promise<DiceTable> | null>(null);
+
+  /** The 3D table, loaded and warmed up once (shared by the background preload and the first roll). */
+  const ensureTable = (): Promise<DiceTable> => {
+    if (!ready.current) {
+      ready.current = (async () => {
+        const mod = await import("../dice/physicsDice");
+        if (!mod.webglAvailable()) throw new Error("this browser has no WebGL 2 (3D graphics) — try updating it, or turning on hardware acceleration");
+        if (!host.current) throw new Error("the dice layer isn't on the page");
+        const t = new mod.DiceTable(host.current);
+        t.warmUp();
+        table.current = t;
+        return t;
+      })();
+      ready.current.catch((e) => {
+        failed.current = true; // the 3D dice can't start here: just show results
+        setDiceProblem(e instanceof Error ? e.message : String(e));
+        report("error", e instanceof Error ? `${e.name}: ${e.message}` : String(e));
+      });
+    }
+    return ready.current;
+  };
 
   const next = () => {
     window.clearTimeout(hold.current);
@@ -130,12 +152,18 @@ export default function DiceRoller({ variant = "game" }: { variant?: "game" | "t
       (window as unknown as { __showDice?: typeof showDice }).__showDice = showDice; // manual testing only
     const onResize = () => table.current?.resize();
     window.addEventListener("resize", onResize);
+    // Get the dice ready in the background shortly after the page opens, so the first roll isn't slow.
+    const pre = window.setTimeout(() => {
+      if (getPrefs().dice && !failed.current) ensureTable().catch(() => undefined);
+    }, 1200);
     return () => {
+      window.clearTimeout(pre);
       subs.delete(on);
       window.removeEventListener("resize", onResize);
       window.clearTimeout(hold.current);
       table.current?.dispose();
       table.current = null;
+      ready.current = null;
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -153,22 +181,13 @@ export default function DiceRoller({ variant = "game" }: { variant?: "game" | "t
     (async () => {
       if (!specs.length || failed.current || !host.current) return finish(centre());
       try {
-        if (!table.current) {
-          const mod = await import("../dice/physicsDice");
-          if (!mod.webglAvailable()) throw new Error("this browser has no WebGL 2 (3D graphics) — try updating it, or turning on hardware acceleration");
-          if (!alive || !host.current) return;
-          table.current = new mod.DiceTable(host.current);
-        }
-        table.current.resize();
+        const t = await ensureTable();
+        t.resize();
         const still = prefersReducedMotion() && getPrefs().diceMotion !== "always"
           && !new URLSearchParams(location.search).has("forcemotion");
-        finish(await table.current.throw(specs, still));
+        finish(await t.throw(specs, still));
       } catch (e) {
-        report("error", e instanceof Error ? `${e.name}: ${e.message} | ${(e.stack ?? "").slice(0, 300)}` : String(e));
-        if (!table.current) {
-          failed.current = true; // the 3D dice can't start here: from now on just show the result
-          setDiceProblem(e instanceof Error ? e.message : String(e));
-        }
+        if (table.current) report("error", e instanceof Error ? `${e.name}: ${e.message} | ${(e.stack ?? "").slice(0, 300)}` : String(e));
         finish(centre());
       }
     })();
