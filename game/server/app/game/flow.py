@@ -14,7 +14,7 @@ from datetime import timedelta
 
 from sqlalchemy import select
 
-from . import art
+from . import art, voices
 from ..config import DEFAULT_MODEL
 from ..db import SessionLocal
 from ..dm import engines, prompt
@@ -631,6 +631,10 @@ async def run_dm(game_id: str) -> None:
             await changed(ctx)
             await notify_phase(ctx)
             spawn(art.refresh_game_art(game_id))  # paint the scene / new monsters in the background (host's Grok key)
+            nid = db.scalar(select(LogEntry.id).where(LogEntry.game_id == game_id, LogEntry.kind == "narration")
+                            .order_by(LogEntry.id.desc()).limit(1))
+            if nid:
+                spawn(voices.voice_narration(game_id, nid))  # speak it with Kokoro, in each character's voice
         except Exception:
             log.exception("saving DM result failed for %s", game_id)
             db.rollback()

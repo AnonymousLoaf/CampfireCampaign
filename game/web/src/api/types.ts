@@ -473,6 +473,8 @@ export interface GameSettings {
   discord_webhook: string | null;
   /** Paint scenes and monsters with the host's Grok (xAI) key. */
   ai_art?: boolean;
+  /** Speak narration with the host PC's Kokoro voices, one per character. */
+  voices?: boolean;
 }
 
 /** Fields the host may PATCH on a running game. */
@@ -493,6 +495,7 @@ export type SettingsPatch = Partial<
     | "dm_model"
     | "discord_webhook"
     | "ai_art"
+    | "voices"
   >
 >;
 

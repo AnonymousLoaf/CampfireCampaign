@@ -27,6 +27,7 @@ DEFAULT_SETTINGS = {
     "input_mode": "individual", "speaker_id": None, "live": False, "live_timer_minutes": 5,
     "dm_engine": "offline", "dm_model": "claude-opus-5-5", "discord_webhook": None,
     "ai_art": True,  # paint scenes and monsters with the host's Grok key, when they've saved one
+    "voices": True,  # speak narration with Kokoro on the host PC, a voice per character
 }
 ENUMS = {
     "story_type": {"dungeon_crawl", "mystery", "heist", "war", "horror", "wilderness", "intrigue", "seafaring", "sandbox"},
@@ -42,7 +43,7 @@ RANGES = {"starting_level": (1, 10), "max_players": (1, 6), "sell_rate": (0.1, 1
           "round_timer_minutes": (5, 7200), "combat_timer_minutes": (5, 7200), "live_timer_minutes": (1, 60)}
 LIVE_EDITABLE = {"round_timer_minutes", "combat_timer_minutes", "live", "live_timer_minutes", "input_mode", "speaker_id",
                  "timeout_policy", "rolls", "combat_mode", "narration_length", "dm_engine", "dm_model",
-                 "discord_webhook", "content_limits", "ai_art"}
+                 "discord_webhook", "content_limits", "ai_art", "voices"}
 
 _locks: dict[str, asyncio.Lock] = {}
 
@@ -84,7 +85,7 @@ def clean_settings(raw: dict, base: dict | None = None, only: set | None = None)
                 raise RulesError(f"invalid value for {k}")
             if not lo <= v <= hi:
                 raise RulesError(f"{k} must be between {lo} and {hi}")
-        elif k in ("live", "ai_art"):
+        elif k in ("live", "ai_art", "voices"):
             v = bool(v)
         elif k in ("content_limits", "discord_webhook", "speaker_id"):
             v = (str(v)[:2000] if v else None) if k != "content_limits" else str(v or "")[:2000]

@@ -74,6 +74,8 @@ How the game works:
 - Boons, Dark Bargains, Threads and faction Renown are yours to invent and hand out in play with grant_boon:
   a boon for a great deed, a bargain offered by something that wants a price, a thread when a character takes on a
   personal goal, renown when a faction notices them. Keep them meaningful and rare, and fair across the party.
+- Dialogue is read aloud in each character's own voice: put speech in double quotes and name the speaker right
+  next to it ("Stay close," Vane says), so the right voice reads it.
 - Keep the party's NPC list, quest journal and the story summary (update_summary) current.
 
 What makes a great DM — hard constraints:

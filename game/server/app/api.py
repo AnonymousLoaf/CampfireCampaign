@@ -480,6 +480,17 @@ async def generate_portrait(cid: str, body: GeneratePortraitBody, u: User = Depe
     return view
 
 
+@router.get("/files/voice/{name}")
+def get_voice(name: str):
+    from .game.voices import AUDIO_DIR
+    if not re.fullmatch(r"[0-9a-f]{12}-\d+\.mp3", name):
+        raise HTTPException(404, "not found")
+    path = AUDIO_DIR / name
+    if not path.exists():
+        raise HTTPException(404, "not found")
+    return FileResponse(path, media_type="audio/mpeg", headers={"Cache-Control": "public, max-age=31536000, immutable"})
+
+
 @router.get("/files/art/{name}")
 def get_art(name: str):
     from .game.art import ART_DIR

@@ -85,7 +85,7 @@ export function LogItem({ e, speak = true }: { e: LogEntry; speak?: boolean }) {
     case "narration":
       return (
         <div className="log-narration">
-          {speak && <SpeakButton id={String(e.id)} text={e.text} />}
+          {speak && <SpeakButton id={String(e.id)} text={e.text} audio={(e.data as { audio?: string } | null)?.audio} />}
           <Paragraphs text={e.text} />
         </div>
       );

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { usePrefs } from "../../util/prefs";
 import { disableSound, isUnlocked, onUnlockChange, play, soundSupported, unlock } from "../../util/sound";
-import { speak, stopSpeaking, ttsSupported, useSpeakingId, useVoices } from "../../util/tts";
+import { canSpeak, speak, stopSpeaking, ttsSupported, useSpeakingId, useVoices } from "../../util/tts";
 
 export function useSoundUnlocked(): boolean {
   const [on, setOn] = useState(isUnlocked());
@@ -10,9 +10,10 @@ export function useSoundUnlocked(): boolean {
 }
 
 /** Speaker button on a narration: read it aloud / stop. */
-export function SpeakButton({ id, text }: { id: string; text: string }) {
+export function SpeakButton({ id, text, audio }: { id: string; text: string; audio?: string | null }) {
   const speaking = useSpeakingId();
-  if (!ttsSupported()) return null;
+  if (!audio && !ttsSupported()) return null;
+  if (!canSpeak()) return null;
   const on = speaking === id;
   return (
     <button
@@ -22,7 +23,7 @@ export function SpeakButton({ id, text }: { id: string; text: string }) {
       onClick={(e) => {
         e.stopPropagation();
         if (on) stopSpeaking();
-        else speak(id, text);
+        else speak(id, text, audio);
       }}
     >
       {on ? "⏹" : "🔈"}
