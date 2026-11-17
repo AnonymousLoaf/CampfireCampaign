@@ -31,7 +31,10 @@ TOOLS: list[dict] = [
          "required": ["character", "check", "dc"]}},
     {"name": "start_combat",
      "description": "Start a fight on the battle map with SRD monsters. Combat is then played turn by turn on the grid; "
-                    "you narrate rounds afterwards. Keep encounters fair for the party's level and the game difficulty.",
+                    "you narrate rounds afterwards. Keep encounters fair for the party's level and the game difficulty. "
+                    "If a scene map is drawn, the fight happens on it: the party starts where they stand, monsters start "
+                    "where you placed hostile NPCs (update the scene map first if needed), and friendly NPCs stay on "
+                    "the map as bystanders. Without a scene map, `terrain` picks a generated map.",
      "input_schema": {"type": "object", "properties": {
          "monsters": {"type": "array", "items": {"type": "object", "properties": {
              "name": {"type": "string", "description": "SRD monster name, e.g. 'Goblin', 'Wolf', 'Bandit', 'Skeleton'"},
@@ -344,10 +347,22 @@ class ToolBox:
         party = self.ctx.living_party()
         if not party:
             raise RulesError("no living party members")
+        # On a scene map, fight right there: same layout, the party where they stood, foes where the DM put the
+        # hostile NPCs, friendly NPCs as bystanders. Otherwise a generated map for the terrain.
+        sm = self.ctx.state.get("scene_map")
+        premade = pc_spots = foe_spots = None
+        bystanders: list = []
+        if sm:
+            premade = scenemap.battle_map(sm, [cid for cid, _ in self.ctx.party()])
+            pc_spots = scenemap.place_party(sm, [cid for cid, _ in party])
+            foe_spots = [(n["x"], n["y"]) for n in sm.get("npcs", []) if n.get("hostile")] or None
+            seen = {tuple(p) for p in premade.get("visible") or []}
+            bystanders = [n for n in sm.get("npcs", []) if not n.get("hostile") and (n["x"], n["y"]) in seen]
         # Typed combat is always individual initiative: one character at a time, each move affects the next.
         enc, lines = combat.start(specs, terrain, party, "classic",
                                   self.ctx.settings.get("death_rule", "standard"), seed=random.randrange(1 << 30),
-                                  ruleset=ruleset, distance=distance if distance in bm.DISTANCES else "far")
+                                  ruleset=ruleset, distance=distance if distance in bm.DISTANCES else "far",
+                                  premade=premade, pc_spots=pc_spots, foe_spots=foe_spots, bystanders=bystanders)
         self.ctx.state["encounter"] = enc
         self.ctx.log_lines(lines)
         self.started_combat = True
@@ -879,7 +894,7 @@ def _roll_combat(ctx: Ctx, roll: dict) -> dict:
     d = (first or {}).get("data") or {}
     r = d.get("roll") or {}
     roll["result"] = {"total": r.get("total", 0), "natural": r.get("natural", 0), "rolls": r.get("rolls", []),
-                      "modifier": roll.get("bonus", 0), "success": d.get("hit"), "hit": d.get("hit"),
+                      "modifier": r.get("modifier", roll.get("bonus", 0)), "success": d.get("hit"), "hit": d.get("hit"),
                       "damage": d.get("damage"),
                       "lines": [ln["text"] for ln in mine] or ["Nothing happened."], "skipped": not mine}
     return roll

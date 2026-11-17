@@ -624,7 +624,8 @@ export interface World {
 export interface Token {
   id: string;
   name: string;
-  kind: "pc" | "monster";
+  /** npc: a friendly bystander on a map made from a scene map (not in the fight). */
+  kind: "pc" | "monster" | "npc";
   character_id: string | null;
   x: number;
   y: number;

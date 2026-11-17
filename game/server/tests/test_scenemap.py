@@ -107,3 +107,47 @@ def test_open_air_is_not_fog_and_ladders_are_walkable():
     assert v["cells"][0][2] == "v"  # the drop beside the rungs: seen, open air
     assert v["cells"][3][4] == " "  # out of a 10 ft light: unseen fog
     assert v["cells"][1][1] == "="
+
+
+def test_fight_starts_on_the_scene_map_with_bystanders():
+    from fastapi.testclient import TestClient
+
+    from app.db import SessionLocal
+    from app.dm.tools import ToolBox
+    from app.game.combat import view as combat_view
+    from app.game.state import load
+    from app.main import app
+
+    from .test_chat import _character, _client
+
+    cave = ["############",
+            "#..........#",
+            "#..........#",
+            "#.....######",
+            "#.....#....#",
+            "############"]
+    with TestClient(app):
+        host = _client("scenefight")
+        gid = host.post("/api/games", json={"name": "F", "character_id": _character(host, "Ash"),
+                                            "settings": {"ruleset": "2024"}}).json()["id"]
+        db = SessionLocal()
+        try:
+            ctx = load(db, gid)
+            tb = ToolBox(ctx)
+            tb.call("draw_scene_map", {"terrain": "cave", "rows": cave, "party_at": {"x": 2, "y": 2},
+                                       "npcs": [{"name": "Pim", "x": 3, "y": 1},
+                                                {"name": "Worg", "x": 9, "y": 1, "hostile": True}]})
+            out = tb.call("start_combat", {"monsters": [{"name": "Wolf", "count": 1}], "terrain": "road"})
+            assert not out.startswith("Error"), out
+            enc = ctx.state["encounter"]
+            assert enc["terrain"] == "cave" and enc["grid"] == {"w": 12, "h": 6}
+            toks = {t["name"]: (t["x"], t["y"]) for t in enc["tokens"].values()}
+            assert toks["Ash"] == (2, 2)  # where they stood (the wolf may already have moved on its turn)
+            assert enc["bystanders"] == [{"name": "Pim", "x": 3, "y": 1}]
+            assert enc["cells"][4][8] == " "  # the room round the corner was never seen: left out of the fight
+            v = combat_view(enc, ctx.chars, [])
+            assert any(t["kind"] == "npc" and t["name"] == "Pim" for t in v["tokens"])
+        finally:
+            db.close()
+
+
