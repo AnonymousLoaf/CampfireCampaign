@@ -33,6 +33,12 @@ def _play(clients, gid, words, max_steps=150):
                         assert r_.get("combat"), r_
                         rr = c.post(f"/api/games/{gid}/roll", json={"roll_id": r_["id"]})
                         assert rr.status_code == 200, rr.text
+                        if rr.json()["result"] is None:  # the attack hit: the damage is a second click
+                            staged = next(x for x in c.get(f"/api/games/{gid}/view").json()["phase"]["pending_rolls"]
+                                          if x["id"] == r_["id"])
+                            assert staged["to_hit"] and "replay" not in staged, staged
+                            rr = c.post(f"/api/games/{gid}/roll", json={"roll_id": r_["id"]})
+                            assert rr.status_code == 200, rr.text
                         assert rr.json()["result"]["lines"]
                         seen_roll = acted = True
                         break
@@ -129,3 +135,25 @@ def test_validate_rejects_out_of_reach_attack():
             raise AssertionError("an attack out of reach should be refused")
         except RulesError as e:
             assert "reach" in str(e) or "range" in str(e)
+
+
+def test_damage_dice_are_fresh_but_to_hit_replays():
+    """The second click of an attack replays the d20 the player saw and throws new damage dice."""
+    from app.rules import dice
+
+    rec: list = []
+    with dice.scripted(record=rec):
+        hit = dice.d20(5)
+        dice.damage("1d8+3")
+        save = dice.d20(2)
+    assert [s for s, _ in rec] == [20, 20]  # damage dice aren't recorded
+    seen = set()
+    for _ in range(40):
+        with dice.scripted(replay=rec):
+            assert dice.d20(5)["natural"] == hit["natural"]
+            seen.add(dice.damage("1d8+3").total)
+            assert dice.d20(2)["natural"] == save["natural"]
+    assert len(seen) > 1
+    with dice.scripted(replay=[[20, 7]]):
+        assert dice.d20()["natural"] == 7
+        dice.die(20)  # past the script: random again, no error

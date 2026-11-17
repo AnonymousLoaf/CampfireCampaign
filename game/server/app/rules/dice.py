@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import random
 import re
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 _rng = random.SystemRandom()
@@ -16,8 +17,34 @@ def set_seed(seed: int | None) -> None:
     _rng = random.Random(seed) if seed is not None else random.SystemRandom()
 
 
+# A player's attack is rolled in two clicks: the d20 first, then the damage. The first click runs the attack on a
+# copy of the fight and records every die except the damage dice; the second runs it for real, replaying those
+# dice in order, so the to-hit roll the player saw stands and only the damage is thrown fresh.
+_record: list[list[int]] | None = None
+_replay: list[list[int]] | None = None
+_in_damage = 0
+
+
+@contextmanager
+def scripted(record: list | None = None, replay: list | None = None):
+    global _record, _replay
+    old = (_record, _replay)
+    _record, _replay = record, (list(replay) if replay is not None else None)
+    try:
+        yield
+    finally:
+        _record, _replay = old
+
+
 def die(sides: int) -> int:
-    return _rng.randint(1, sides)
+    if not _in_damage and _replay:
+        if _replay[0][0] == sides:
+            return _replay.pop(0)[1]
+        _replay.clear()  # the run took another path: everything from here on is fresh
+    v = _rng.randint(1, sides)
+    if _record is not None and not _in_damage:
+        _record.append([sides, v])
+    return v
 
 
 @dataclass
@@ -71,6 +98,15 @@ def d20(modifier: int = 0, advantage: str = "normal") -> dict:
 
 def damage(notation: str, crit: bool = False) -> Roll:
     """Roll damage; a critical hit doubles the dice (not the modifier)."""
+    global _in_damage
+    _in_damage += 1
+    try:
+        return _damage(notation, crit)
+    finally:
+        _in_damage -= 1
+
+
+def _damage(notation: str, crit: bool) -> Roll:
     if not crit:
         return roll(notation)
     m = _NOTATION.match(notation.replace(" ", ""))

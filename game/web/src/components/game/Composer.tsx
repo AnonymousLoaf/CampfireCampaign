@@ -184,7 +184,28 @@ export function RollComposer() {
                 {r.dc !== null && <span className="badge">DC {r.dc}</span>}
                 {r.advantage !== "normal" && <span className={`badge ${r.advantage === "advantage" ? "green" : "red"}`}>{r.advantage}</span>}
               </div>
-              {!r.result && <RollNeed r={r} saveDc={c?.spellcasting?.save_dc} />}
+              {!r.result && !r.to_hit && <RollNeed r={r} saveDc={c?.spellcasting?.save_dc} />}
+              {!r.result && r.to_hit && (
+                <div className="roll-result">
+                  <span className="dice-row inline">
+                    {r.to_hit.rolls.map((d, i) => (
+                      <span key={i} className={`die ${d === 20 ? "crit" : d === 1 ? "fumble" : ""}`}>
+                        {d}
+                      </span>
+                    ))}
+                  </span>
+                  <span>
+                    {r.to_hit.modifier >= 0 ? "+" : ""}
+                    {r.to_hit.modifier} = <strong className="big-num">{r.to_hit.total}</strong>
+                  </span>
+                  <span className="badge green">{r.to_hit.crit ? "Critical hit" : "Hit"}</span>
+                  <div className="roll-need small">
+                    {r.to_hit.attack ?? "The attack"} hits{r.to_hit.target ? ` ${r.to_hit.target}` : ""}. Now roll its damage
+                    {r.to_hit.dice ? ` (${r.to_hit.dice})` : ""}
+                    {r.to_hit.crit ? ", with the dice doubled for the critical hit" : ""}.
+                  </div>
+                </div>
+              )}
               {r.result ? (
                 <div className="roll-result">
                   <span className="dice-row inline">
@@ -212,7 +233,7 @@ export function RollComposer() {
                 </div>
               ) : canRoll ? (
                 <button className="btn primary big" onClick={() => void run(() => api.roll(gameId, r.id))}>
-                  🎲 Roll
+                  {r.to_hit ? `🎲 Roll damage${r.to_hit.dice ? ` (${r.to_hit.dice})` : ""}` : "🎲 Roll"}
                 </button>
               ) : (
                 <span className="muted small">Waiting for {view.members.find((m) => m.user_id === r.user_id)?.display_name ?? "player"}…</span>

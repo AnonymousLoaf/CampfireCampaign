@@ -574,6 +574,17 @@ export interface PendingRoll {
   combat?: Record<string, unknown> | null;
   /** A spell cast outside combat: its healing or damage dice, e.g. "2d8" (bonus is added). */
   dice?: string;
+  /** Typed combat: the attack already hit with this d20; the second click throws the damage dice. */
+  to_hit?: {
+    rolls: number[];
+    natural: number;
+    total: number;
+    modifier: number;
+    crit: boolean;
+    attack?: string | null;
+    dice?: string | null;
+    target?: string | null;
+  } | null;
   what?: string;
 }
 

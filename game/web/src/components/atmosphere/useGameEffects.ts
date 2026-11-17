@@ -125,6 +125,8 @@ export function useGameEffects(view: GameView, opts: { tv?: boolean } = {}) {
             damage?: number;
             damage_dice?: { sides: number; value: number }[];
             heal?: number;
+            /** the second click of an attack: its d20 was shown on the first */
+            damage_only?: boolean;
           };
           const r = cd.roll;
           // healing in a fight (Cure Wounds on an ally): its dice roll too
@@ -142,7 +144,8 @@ export function useGameEffects(view: GameView, opts: { tv?: boolean } = {}) {
           }
           if (cd.attacker?.startsWith("pc-") && r && typeof r.natural === "number" && typeof r.total === "number") {
             const c = view.characters[cd.attacker.slice(3)];
-            showDice({
+            if (!cd.damage_only)
+              showDice({
               kind: "attack",
               natural: r.natural,
               total: r.total,

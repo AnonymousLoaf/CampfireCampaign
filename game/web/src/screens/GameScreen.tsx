@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
-import type { GameView, Me } from "../api/types";
+import type { GameView, Me, Token } from "../api/types";
 import { emitChat, subscribe } from "../api/ws";
 import ChatPanel from "../components/game/ChatPanel";
 import { navigate } from "../router";
@@ -14,7 +14,7 @@ import HostSettingsModal from "../components/game/HostSettingsModal";
 import TvLinkModal from "../components/game/TvLinkModal";
 import { CombatComposer, CombatTurnBanner, ExplorationComposer, RollComposer, ShopComposer } from "../components/game/Composer";
 import WorldMap from "../maps/WorldMap";
-import BattleMap from "../maps/BattleMap";
+import BattleMap, { type TokenInfo } from "../maps/BattleMap";
 import LevelUpModal from "../components/LevelUpModal";
 import AwayControl from "../components/game/AwayControl";
 import CatchUp from "../components/game/CatchUp";
@@ -239,6 +239,30 @@ function GameLoaded({
     openLevelUp: (id) => setLevelUpFor(id),
   };
 
+  // What the party knows about a piece on the map: a character's sheet, or the NPC journal entry for that name.
+  const infoFor = (t: Token): TokenInfo | null => {
+    if (t.character_id) {
+      const c = view.characters[t.character_id];
+      if (!c) return null;
+      const lineage = c.subrace ? `${c.subrace}` : c.race;
+      return {
+        subtitle: `Level ${c.level} ${lineage} ${c.class}${c.subclass ? ` (${c.subclass})` : ""}`,
+        lines: [`${c.background ? `${c.background} · ` : ""}${c.alignment ?? ""}`.replace(/ · $/, "")].filter(Boolean),
+        portrait: c.portrait_url,
+      };
+    }
+    const key = t.name.replace(/\s+\d+$/, "").trim().toLowerCase(); // "Goblin 2" → "goblin"
+    const n =
+      view.npcs.find((x) => x.name.toLowerCase() === key) ??
+      view.npcs.find((x) => key.length >= 3 && (x.name.toLowerCase().includes(key) || key.includes(x.name.toLowerCase())));
+    if (!n) return null;
+    return {
+      subtitle: [n.role, n.attitude && n.attitude !== "neutral" ? n.attitude : ""].filter(Boolean).join(" · "),
+      lines: n.notes ? [n.notes] : [],
+      portrait: n.portrait_url,
+    };
+  };
+
   // My own token on the battle map (for "N ft from you" on the info card).
   const viewerTokenId = enc?.tokens.find((t) => t.kind === "pc" && t.character_id === (actingId ?? view.me.character_id))?.id ?? null;
 
@@ -409,10 +433,10 @@ function GameLoaded({
                   <div className="map-empty muted">The world map appears when the game starts.</div>
                 ))}
               {mapTab === "scene" && view.scene_map && (
-                <BattleMap encounter={view.scene_map} portraits={portraits} viewerTokenId={view.scene_map.my_token_id} interactive backdrop={!!view.scene_art} />
+                <BattleMap encounter={view.scene_map} portraits={portraits} viewerTokenId={view.scene_map.my_token_id} interactive backdrop={!!view.scene_art} infoFor={infoFor} />
               )}
               {mapTab === "battle" && enc && (
-                <BattleMap encounter={enc} portraits={portraits} actorTokenId={enc.turn.actor_id} viewerTokenId={viewerTokenId} interactive backdrop={!!view.scene_art} />
+                <BattleMap encounter={enc} portraits={portraits} actorTokenId={enc.turn.actor_id} viewerTokenId={viewerTokenId} interactive backdrop={!!view.scene_art} infoFor={infoFor} />
               )}
             </div>
     </section>

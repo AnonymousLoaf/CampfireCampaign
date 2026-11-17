@@ -3,6 +3,14 @@ import type { Encounter, Token } from "../api/types";
 import { initials } from "../util/format";
 import { getCtx, useCanvasSize } from "./useCanvas";
 import { distanceFt } from "./combatUtil";
+import { PortraitLightbox } from "../components/Portrait";
+
+/** What the party knows about a piece on the map: a subtitle, journal lines, and a portrait. */
+export interface TokenInfo {
+  subtitle?: string;
+  lines?: string[];
+  portrait?: string | null;
+}
 
 const TERRAIN_STYLE: Record<string, { floor: string; floorAlt: string; wall: string; obstacle: string; grid: string; difficult: string }> = {
   road: { floor: "#8b7b55", floorAlt: "#7d8a4e", wall: "#4b4238", obstacle: "#5b4a33", grid: "rgba(0,0,0,0.18)", difficult: "rgba(90,120,60,0.55)" },
@@ -17,8 +25,26 @@ const TERRAIN_STYLE: Record<string, { floor: string; floorAlt: string; wall: str
 };
 
 /** What a player could know about a creature on the map — shown when its token is clicked. Nothing here acts. */
-function TokenCard({ token, from, x, y, isActor, onClose }: { token: Token; from: Token | null; x: number; y: number; isActor: boolean; onClose: () => void }) {
+function TokenCard({
+  token,
+  from,
+  x,
+  y,
+  isActor,
+  info,
+  onClose,
+}: {
+  token: Token;
+  from: Token | null;
+  x: number;
+  y: number;
+  isActor: boolean;
+  info?: TokenInfo | null;
+  onClose: () => void;
+}) {
   const ref = useRef<HTMLDivElement>(null);
+  const [zoom, setZoom] = useState(false);
+  const art = info?.portrait || token.portrait_url || null;
   const [pos, setPos] = useState({ left: x + 12, top: y - 10 });
   // Keep the card inside the map: flip left near the right edge, lift it near the bottom.
   useLayoutEffect(() => {
@@ -30,13 +56,22 @@ function TokenCard({ token, from, x, y, isActor, onClose }: { token: Token; from
     if (left + el.offsetWidth > parent.clientWidth - 8) left = x - 12 - el.offsetWidth;
     if (top + el.offsetHeight > parent.clientHeight - 8) top = parent.clientHeight - 8 - el.offsetHeight;
     setPos({ left: Math.max(8, left), top: Math.max(8, top) });
-  }, [x, y]);
+  }, [x, y, art]);
   const isPc = token.kind === "pc";
   const wounds = WOUNDS[token.hp_state] ?? cap(token.hp_state);
   const dist = from && from.id !== token.id ? distanceFt(from, token) : null;
   return (
     <div className="token-card" ref={ref} style={pos} role="dialog" aria-label={token.name}>
-      {token.kind === "monster" && token.portrait_url && <img className="token-card-art" src={token.portrait_url} alt="" />}
+      {art && (
+        <img
+          className="token-card-art"
+          src={art}
+          alt={`${token.name} portrait`}
+          title="Click to enlarge"
+          onClick={() => setZoom(true)}
+        />
+      )}
+      {zoom && art && <PortraitLightbox url={art} name={token.name} onClose={() => setZoom(false)} />}
       <div className="token-card-head">
         <span className="char-dot" style={{ background: token.color }} />
         <strong>{token.name}</strong>
@@ -63,13 +98,19 @@ function TokenCard({ token, from, x, y, isActor, onClose }: { token: Token; from
         </div>
       ) : token.kind === "npc" ? (
         <div className="token-card-stats">
-          <span className="badge">Bystander</span>
+          <span className="badge">Not in the fight</span>
         </div>
       ) : (
         <div className="token-card-stats">
           <span className={`badge ${token.hp_state === "bloodied" ? "red" : ""}`}>{wounds}</span>
         </div>
       )}
+      {info?.subtitle && <div className="small token-card-sub">{info.subtitle}</div>}
+      {(info?.lines ?? []).map((l, i) => (
+        <div key={i} className="small token-card-line">
+          {l}
+        </div>
+      ))}
       {token.conditions.length > 0 && <div className="small">{token.conditions.join(", ")}</div>}
       {dist !== null && <div className="muted small">{dist} ft from you</div>}
     </div>
@@ -85,6 +126,7 @@ export default function BattleMap({
   interactive = true,
   portraits,
   backdrop = false,
+  infoFor,
 }: {
   encounter: Encounter;
   /** Whose turn it is — drawn with a gold ring so everyone can see. */
@@ -95,6 +137,8 @@ export default function BattleMap({
   interactive?: boolean;
   /** character_id → portrait URL; drawn clipped inside PC token circles. */
   portraits?: Record<string, string | null | undefined>;
+  /** What the party knows about a piece, shown on its card when clicked. */
+  infoFor?: (t: Token) => TokenInfo | null;
   /** A painting sits behind the map: draw the floor see-through and offer a button to peek at it. */
   backdrop?: boolean;
 }) {
@@ -103,7 +147,7 @@ export default function BattleMap({
   // Preload portraits; redraw once each image arrives.
   const [imgTick, setImgTick] = useState(0);
   const portraitFor = (t: Token): HTMLImageElement | null => {
-    const url = t.portrait_url || (t.character_id ? portraits?.[t.character_id] : null);
+    const url = t.portrait_url || (t.character_id ? portraits?.[t.character_id] : null) || infoFor?.(t)?.portrait || null;
     return url ? portraitImage(url, () => setImgTick((n) => n + 1)) : null;
   };
   const [hover, setHover] = useState<{ x: number; y: number } | null>(null);
@@ -234,7 +278,7 @@ export default function BattleMap({
       inTemplate: false,
     }, portraitFor(t));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [encounter, size, cell, ox, oy, w, h, style, propMap, actorTokenId, inspect?.id, hover, canvasRef, portraits, imgTick, backdrop]);
+  }, [encounter, size, cell, ox, oy, w, h, style, propMap, actorTokenId, inspect?.id, hover, canvasRef, portraits, imgTick, backdrop, infoFor]);
 
   const squareAt = (e: { clientX: number; clientY: number }) => {
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -423,7 +467,15 @@ export default function BattleMap({
         </div>
       )}
       {inspected && inspect && interactive && (
-        <TokenCard token={inspected} from={viewer} x={inspect.x} y={inspect.y} isActor={inspected.id === actorTokenId} onClose={() => setInspect(null)} />
+        <TokenCard
+          token={inspected}
+          from={viewer}
+          x={inspect.x}
+          y={inspect.y}
+          isActor={inspected.id === actorTokenId}
+          info={infoFor ? infoFor(inspected) : null}
+          onClose={() => setInspect(null)}
+        />
       )}
       {(legend.kinds.length > 0 || legend.hasDifficult) && (
         <div className="map-overlay bottom-left">
