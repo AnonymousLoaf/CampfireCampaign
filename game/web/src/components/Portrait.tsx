@@ -141,16 +141,33 @@ export function PortraitEditor({
   c,
   upload,
   remove,
+  generate,
   size = "big",
 }: {
   c: CharacterView;
   upload: (f: File) => Promise<unknown>;
   remove: () => Promise<unknown>;
+  /** Paint one with Grok from a short description (needs a Grok key in Settings). */
+  generate?: (notes: string) => Promise<unknown>;
   size?: Size;
 }) {
   const input = useRef<HTMLInputElement | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [painting, setPainting] = useState<string | null>(null); // the description being written, when open
+  const paint = async () => {
+    if (!generate || painting === null) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await generate(painting.trim());
+      setPainting(null);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const pick = async (f: File | undefined) => {
     if (!f) return;
@@ -195,8 +212,33 @@ export function PortraitEditor({
             Remove
           </button>
         )}
+        {generate && painting === null && (
+          <button className="btn tiny ghost" disabled={busy} onClick={() => setPainting("")} title="Paint a portrait with your Grok key">
+            ✨ Paint with Grok
+          </button>
+        )}
         {err && <span className="error-text small">{err}</span>}
       </div>
+      {generate && painting !== null && (
+        <div className="paint-portrait">
+          <textarea
+            rows={2}
+            maxLength={600}
+            autoFocus
+            value={painting}
+            placeholder="What do they look like? e.g. bronze scales, a scarred snout, battered plate armour"
+            onChange={(e) => setPainting(e.target.value)}
+          />
+          <div className="row gap">
+            <button className="btn tiny ghost" disabled={busy} onClick={() => setPainting(null)}>
+              Cancel
+            </button>
+            <button className="btn tiny primary" disabled={busy} onClick={() => void paint()}>
+              {busy ? "Painting… (about 10 s)" : "Paint portrait (about $0.02)"}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -15,6 +15,7 @@ from ..rules import shop as shop_rules
 from ..rules.character import RulesError
 from ..world import hexmap
 from ..world import scenemap
+from .art import art_url
 from . import combat
 
 DEFAULT_SETTINGS = {
@@ -25,6 +26,7 @@ DEFAULT_SETTINGS = {
     "round_timer_minutes": 1440, "combat_timer_minutes": None, "timeout_policy": "ai",
     "input_mode": "individual", "speaker_id": None, "live": False, "live_timer_minutes": 5,
     "dm_engine": "offline", "dm_model": "claude-opus-5-5", "discord_webhook": None,
+    "ai_art": True,  # paint scenes and monsters with the host's Grok key, when they've saved one
 }
 ENUMS = {
     "story_type": {"dungeon_crawl", "mystery", "heist", "war", "horror", "wilderness", "intrigue", "seafaring", "sandbox"},
@@ -40,7 +42,7 @@ RANGES = {"starting_level": (1, 10), "max_players": (1, 6), "sell_rate": (0.1, 1
           "round_timer_minutes": (5, 7200), "combat_timer_minutes": (5, 7200), "live_timer_minutes": (1, 60)}
 LIVE_EDITABLE = {"round_timer_minutes", "combat_timer_minutes", "live", "live_timer_minutes", "input_mode", "speaker_id",
                  "timeout_policy", "rolls", "combat_mode", "narration_length", "dm_engine", "dm_model",
-                 "discord_webhook", "content_limits"}
+                 "discord_webhook", "content_limits", "ai_art"}
 
 _locks: dict[str, asyncio.Lock] = {}
 
@@ -82,7 +84,7 @@ def clean_settings(raw: dict, base: dict | None = None, only: set | None = None)
                 raise RulesError(f"invalid value for {k}")
             if not lo <= v <= hi:
                 raise RulesError(f"{k} must be between {lo} and {hi}")
-        elif k == "live":
+        elif k in ("live", "ai_art"):
             v = bool(v)
         elif k in ("content_limits", "discord_webhook", "speaker_id"):
             v = (str(v)[:2000] if v else None) if k != "content_limits" else str(v or "")[:2000]
@@ -371,6 +373,7 @@ def build_view(db: Session, ctx: Ctx, uid: str | None, tv: bool = False) -> dict
         "location": ctx.state.get("location") or {"name": "", "settlement_id": None, "description": ""},
         "scene": ctx.state.get("scene") or {"type": "town", "time_of_day": "morning", "weather": "clear", "day": 1, "hour": 8},
         "encounter": combat.view(enc, ctx.chars, controls) if enc else None,
+        "scene_art": art_url((ctx.state.get("scene_art") or {}).get("name")),
         "scene_map": scenemap.view(ctx.state["scene_map"], ctx.party(), my_member.character_id if my_member else None)
                      if ctx.state.get("scene_map") else None,
         "shop": shop_rules.stock_view(shop) if shop else None,

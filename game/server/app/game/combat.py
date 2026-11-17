@@ -36,19 +36,45 @@ def line(text: str, kind: str = "combat", **data) -> dict:
 
 # ── setup ───────────────────────────────────────────────────────────────────
 
+def _spots_near(m: dict, wanted: list, taken: set) -> list[tuple[int, int]]:
+    """A free, passable square for each wanted spot: the spot itself, else the nearest free one (None = anywhere)."""
+    w, h = m["grid"]["w"], m["grid"]["h"]
+    free = [(x, y) for y in range(h) for x in range(w) if bm.passable(m, x, y)]
+    out = []
+    for want in wanted:
+        opts = [p for p in free if p not in taken and p not in out]
+        if not opts:
+            break
+        p = min(opts, key=lambda q: bm.distance_ft(q, tuple(want))) if want else opts[0]
+        out.append(p)
+    return out
+
+
 def start(specs: list[tuple[str, int]], terrain: str, party: list[tuple[str, dict]], mode: str = "side",
           death_rule: str = "standard", seed: int | None = None, ruleset: str = "2014",
-          distance: str = "far") -> tuple[dict, list[dict]]:
-    """party: [(character_id, sheet)] — living characters only."""
+          distance: str = "far", premade: dict | None = None, pc_spots: dict | None = None,
+          foe_spots: list | None = None, bystanders: list | None = None) -> tuple[dict, list[dict]]:
+    """party: [(character_id, sheet)] — living characters only. `premade`: a map to fight on (the scene map) instead
+    of a generated one; `pc_spots` {character_id: (x, y)} and `foe_spots` [(x, y)] say where each side starts."""
     rng = random.Random(seed)
-    m = bm.generate(terrain if terrain in bm.TERRAINS else "road", seed)
+    m = premade or bm.generate(terrain if terrain in bm.TERRAINS else "road", seed)
     enc = {**m, "round": 1, "mode": mode if mode in ("side", "classic") else "side", "death_rule": death_rule,
            "ruleset": ruleset,
            "tokens": {}, "order": [], "idx": 0, "turn": {"side": "party", "actor_id": None},
            "round_log": [], "custom_actions": [], "xp": 0, "outcome": None, "monsters_cr": []}
     taken: set = set()
     pcs = [(cid, s) for cid, s in party if not s.get("dead")]
-    for (cid, s), (x, y) in zip(pcs, bm.deploy(m, len(pcs), "left", taken, rng, distance)):
+    enc.pop("visible", None)
+    if bystanders:  # friendly NPCs on a scene map: they stay put and take up their squares
+        enc["bystanders"] = []
+        for b in bystanders:
+            xy = (int(b["x"]), int(b["y"]))
+            if bm.passable(m, *xy) and xy not in taken:
+                taken.add(xy)
+                enc["bystanders"].append({"name": str(b["name"])[:40], "x": xy[0], "y": xy[1]})
+    pc_xy = _spots_near(m, [tuple(pc_spots[c]) if pc_spots and c in pc_spots else None for c, _ in pcs], taken) \
+        if pc_spots else bm.deploy(m, len(pcs), "left", taken, rng, distance)
+    for (cid, s), (x, y) in zip(pcs, pc_xy):
         taken.add((x, y))
         tid = f"pc-{cid}"
         enc["tokens"][tid] = {"id": tid, "name": s["name"], "kind": "pc", "character_id": cid, "x": x, "y": y,
@@ -61,7 +87,8 @@ def start(specs: list[tuple[str, int]], terrain: str, party: list[tuple[str, dic
         rec = srd.monsters(ruleset).get(idx) or srd.monsters().get(idx)
         if not rec:
             continue
-        spots = bm.deploy(m, count, "right", taken, rng, distance)
+        spots = _spots_near(m, [foe_spots[(n + i) % len(foe_spots)] for i in range(count)], taken) if foe_spots \
+            else bm.deploy(m, count, "right", taken, rng, distance)
         for i, (x, y) in enumerate(spots):
             taken.add((x, y))
             n += 1
@@ -173,7 +200,7 @@ def incapacitated(t: dict, chars: dict) -> bool:
 
 
 def occupied(enc: dict, chars: dict, exclude: str | None = None) -> set[tuple[int, int]]:
-    return {pos(t) for t in enc["tokens"].values() if t["id"] != exclude and present(t, chars)}
+    return {pos(t) for t in enc["tokens"].values() if t["id"] != exclude and present(t, chars)}         | {(b["x"], b["y"]) for b in enc.get("bystanders") or []}  # NPCs standing around take up their squares
 
 
 def enemies(enc: dict, t: dict, chars: dict) -> list[dict]:
@@ -919,11 +946,15 @@ def cast(enc: dict, chars: dict, tid: str, spell_index: str, target_id: str | No
             pool = sorted({a["id"]: a for a in pool}.values(), key=lambda a: chars[a["character_id"]]["hp"])
             targets = [tgt] + [a for a in pool if a["id"] != tgt["id"]][: eff["multi"] - 1]
         for a in targets:
-            amount = dice.roll(_upcast(eff["dice"], eff.get("upcast"), up)).total + smod
+            hr = dice.roll(_upcast(eff["dice"], eff.get("upcast"), up))
+            bonus = smod
             if s["class"] == "cleric" and str(s.get("subclass") or "") == "life":
-                amount += 2 + max(1, slot)
-            healed = ch.heal(chars[a["character_id"]], max(1, amount))
-            out.append(line(f"{a['name']} regains {healed} HP.", "combat", target=a["id"], heal=healed))
+                bonus += 2 + max(1, slot)
+            amount = max(1, hr.total + bonus)
+            healed = ch.heal(chars[a["character_id"]], amount)
+            out.append(line(f"{a['name']} regains {healed} HP ({' + '.join(map(str, hr.rolls))}{bonus:+d} = {amount}).",
+                            "combat", target=a["id"], heal=healed,
+                            roll={"rolls": hr.rolls, "natural": None, "modifier": bonus, "total": amount}))
         if ch.has_feature(s, "Blessed Healer") and any(a["id"] != t["id"] for a in targets) and slot:
             bh = ch.heal(s, 2 + slot)
             if bh:
@@ -1639,7 +1670,8 @@ def view(enc: dict, chars: dict, controls: list[str], prefer: str | None = None)
             tokens.append({"id": t["id"], "name": t["name"], "kind": "monster", "character_id": None,
                            "x": t["x"], "y": t["y"], "hp": None, "hp_max": None, "hp_state": hp_state(t, chars),
                            "ac": None, "conditions": t["conditions"], "speed": t["speed"], "size": 1, "color": t["color"],
-                           "done": bool(t.get("done")), **flags})
+                           "done": bool(t.get("done")),
+                           "portrait_url": f"/api/files/art/{t['art']}" if t.get("art") else None, **flags})
     actable = [f"pc-{c}" for c in ([prefer] if prefer else []) + controls if can_act(enc, f"pc-{c}", chars)]
     mine = actable[0] if actable else None
     reach: list = []
@@ -1684,7 +1716,11 @@ def view(enc: dict, chars: dict, controls: list[str], prefer: str | None = None)
     return {
         "round": enc["round"], "mode": enc["mode"], "turn": enc["turn"], "grid": enc["grid"], "cells": enc["cells"],
         "terrain": enc["terrain"], "props": enc.get("props", []), "difficult": enc.get("difficult", "difficult terrain"),
-        "tokens": tokens, "my_turn": bool(mine), "my_token_id": mine, "budget": budget,
+        "tokens": tokens + [{"id": f"npc-{i}", "name": b["name"], "kind": "npc", "character_id": None, "x": b["x"],
+                             "y": b["y"], "hp": None, "hp_max": None, "hp_state": "healthy", "ac": None, "conditions": [],
+                             "speed": 30, "size": 1, "color": "#5a7d9a", "done": True}
+                            for i, b in enumerate(enc.get("bystanders") or [])],
+        "my_turn": bool(mine), "my_token_id": mine, "budget": budget,
         "reachable": reach, "targets": targets, "point_spells": point_spells, "outcome": enc.get("outcome"),
         "spiritual_weapon": bool(mine and enc["tokens"][mine].get("spiritual_weapon")),
     }

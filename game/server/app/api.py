@@ -60,6 +60,7 @@ def current_user(session: str | None = Cookie(default=None), db: Session = Depen
 def me_dict(u: User) -> dict:
     return {"id": u.id, "username": u.username, "display_name": u.display_name,
             "has_api_key": bool(u.api_key_enc), "api_key_last4": u.api_key_last4,
+            "has_xai_key": bool(u.xai_key_enc), "xai_key_last4": u.xai_key_last4,
             "email": u.email, "notify": {"email": bool(u.notify_email), "push": bool(u.notify_push if u.notify_push is not None else True),
                                          "remind_minutes": u.remind_minutes if u.remind_minutes is not None else 60,
                                          "chat": bool(u.notify_chat)}}
@@ -140,6 +141,25 @@ def put_key(body: KeyBody, u: User = Depends(current_user), db: Session = Depend
 def delete_key(u: User = Depends(current_user), db: Session = Depends(get_db)):
     u.api_key_enc = None
     u.api_key_last4 = None
+    db.commit()
+    return me_dict(u)
+
+
+@router.put("/me/xai-key")
+def put_xai_key(body: KeyBody, u: User = Depends(current_user), db: Session = Depends(get_db)):
+    k = body.key.strip()
+    if not k.startswith("xai-"):
+        raise HTTPException(400, "that doesn't look like an xAI (Grok) API key (they start with xai-)")
+    u.xai_key_enc = encrypt_secret(k)
+    u.xai_key_last4 = k[-4:]
+    db.commit()
+    return me_dict(u)
+
+
+@router.delete("/me/xai-key")
+def delete_xai_key(u: User = Depends(current_user), db: Session = Depends(get_db)):
+    u.xai_key_enc = None
+    u.xai_key_last4 = None
     db.commit()
     return me_dict(u)
 
@@ -393,6 +413,62 @@ async def upload_portrait(cid: str, image: UploadFile = File(...), u: User = Dep
     if old.get("name"):
         (PORTRAIT_DIR / old["name"]).unlink(missing_ok=True)
     return view
+
+
+class GeneratePortraitBody(BaseModel):
+    notes: str = Field(default="", max_length=600)
+
+
+@router.post("/characters/{cid}/portrait/generate")
+async def generate_portrait(cid: str, body: GeneratePortraitBody, u: User = Depends(current_user)):
+    """Paint a portrait with my Grok (xAI) key from the character's race, class and a short description."""
+    import shutil
+
+    from .game import art
+    if not u.xai_key_enc:
+        raise HTTPException(400, "save a Grok (xAI) API key in Settings first")
+    db = SessionLocal()
+    try:
+        c = db.get(Character, cid)
+        if not c or c.owner_id != u.id:
+            raise HTTPException(404, "character not found")
+        v = ch.view(c.id, c.owner_id, c.game_id, c.sheet)
+        prompt = art.character_prompt(c.sheet, v.get("race") or "", v.get("class_name") or v.get("class") or "",
+                                      body.notes)
+    finally:
+        db.close()
+    import secrets as _s
+    prompt += f" Variation {_s.token_hex(3)}."  # asking again gives a new picture, not the cached one
+    try:
+        art_file = await art.generate(decrypt_secret(u.xai_key_enc), prompt, "1:1", 640)
+    except art.ArtError as e:
+        raise HTTPException(502, str(e))
+    PORTRAIT_DIR.mkdir(parents=True, exist_ok=True)
+    name = secrets.token_urlsafe(16) + ".webp"
+    shutil.copyfile(art.ART_DIR / art_file, PORTRAIT_DIR / name)
+    (art.ART_DIR / art_file).unlink(missing_ok=True)
+    old: dict = {}
+
+    def fn(sheet: dict) -> None:
+        old["name"] = sheet.get("portrait")
+        sheet["portrait"] = name
+        if body.notes.strip():
+            sheet["appearance"] = body.notes.strip()[:600]
+    view = await _edit_character(u, cid, fn)
+    if old.get("name"):
+        (PORTRAIT_DIR / old["name"]).unlink(missing_ok=True)
+    return view
+
+
+@router.get("/files/art/{name}")
+def get_art(name: str):
+    from .game.art import ART_DIR
+    if not re.fullmatch(r"[0-9a-f]{24}\.webp", name):
+        raise HTTPException(404, "not found")
+    path = ART_DIR / name
+    if not path.exists():
+        raise HTTPException(404, "not found")
+    return FileResponse(path, media_type="image/webp", headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 
 @router.delete("/characters/{cid}/portrait")

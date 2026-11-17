@@ -118,7 +118,7 @@ export function ExplorationComposer() {
         }}
       />
       <div className="composer-row">
-        <span className="muted small">Want to travel? Say where — "we take the east road to the next town." Click the map to see what you know about a place.</span>
+        <span className="muted small travel-hint">Want to travel? Say where — "we take the east road to the next town." Click the map to see what you know about a place.</span>
         <div className="grow" />
         {mine && (
           <button className="btn ghost small" disabled={busy} onClick={() => void run(() => api.withdrawAction(gameId))}>

@@ -12,7 +12,7 @@ import heapq
 import random
 
 TERRAINS = ("road", "forest", "tavern", "cave", "dungeon", "ruins", "camp", "swamp", "town")
-BLOCKING = set("#T ")
+BLOCKING = set("#T v")  # v: open air on a map made from a scene map
 DISTANCES = ("close", "near", "far")
 
 

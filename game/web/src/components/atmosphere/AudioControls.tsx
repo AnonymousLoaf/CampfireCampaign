@@ -31,7 +31,7 @@ export function SpeakButton({ id, text }: { id: string; text: string }) {
 }
 
 /** "🔊 Enable sound" until the player taps it; then a small speaker that opens the audio settings. */
-export function SoundChip({ tv = false }: { tv?: boolean }) {
+export function SoundChip({ tv = false, compact = false }: { tv?: boolean; compact?: boolean }) {
   const unlocked = useSoundUnlocked();
   const [open, setOpen] = useState(false);
   const [prefs] = usePrefs();
@@ -39,7 +39,7 @@ export function SoundChip({ tv = false }: { tv?: boolean }) {
   if (!unlocked)
     return (
       <button className={`sound-chip ${tv ? "big" : ""}`} onClick={() => unlock()} title="Ambience and sound effects (synthesized in your browser)">
-        🔊 Enable sound
+        {compact ? "🔈" : "🔊 Enable sound"}
       </button>
     );
   return (
@@ -65,7 +65,7 @@ export function SoundChip({ tv = false }: { tv?: boolean }) {
 }
 
 /** Big "Read the story aloud" toggle for the TV view. */
-export function AutoReadToggle({ tv = false }: { tv?: boolean }) {
+export function AutoReadToggle({ tv = false, compact = false }: { tv?: boolean; compact?: boolean }) {
   const [prefs, set] = usePrefs();
   if (!ttsSupported()) return null;
   const on = tv ? prefs.tvAutoRead : prefs.autoRead;
@@ -80,7 +80,7 @@ export function AutoReadToggle({ tv = false }: { tv?: boolean }) {
       aria-pressed={on}
       title="Read new narration aloud as it arrives"
     >
-      {on ? "🗣 Reading aloud" : "🗣 Read aloud: off"}
+      {compact ? "🗣" : on ? "🗣 Reading aloud" : "🗣 Read aloud: off"}
     </button>
   );
 }

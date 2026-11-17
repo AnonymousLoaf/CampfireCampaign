@@ -209,7 +209,7 @@ def view(sm: dict, party: list[tuple[str, dict]], viewer_char: str | None) -> di
                        "ac": None, "conditions": [], "speed": 30, "size": 1, "color": s.get("color", "#c9a227")})
     for i, n in enumerate(sm.get("npcs", [])):
         if (n["x"], n["y"]) in vis:
-            tokens.append({"id": f"npc-{i}", "name": n["name"], "kind": "monster", "character_id": None,
+            tokens.append({"id": f"npc-{i}", "name": n["name"], "kind": "monster" if n["hostile"] else "npc", "character_id": None,
                            "x": n["x"], "y": n["y"], "hp": None, "hp_max": None, "hp_state": "healthy", "ac": None,
                            "conditions": [], "speed": 30, "size": 1,
                            "color": "#b03a2e" if n["hostile"] else "#5a7d9a"})
@@ -237,3 +237,22 @@ def describe(sm: dict, party: list[tuple[str, dict]]) -> str:
     if sm.get("features"):
         lines.append("Features: " + ", ".join(f"{f['label']} ({f['x']},{f['y']})" for f in sm["features"]))
     return "\n".join(lines)
+
+
+def battle_map(sm: dict, char_ids: list[str]) -> dict:
+    """The scene map as a battle map: what the party has seen is the battlefield (open air becomes 'v', which
+    blocks movement); squares they've never seen are left out, so a fight doesn't reveal them."""
+    vis = refresh(sm, char_ids)
+    w, h = sm["w"], sm["h"]
+    seen = sm.get("seen") or ""
+
+    def cell(x: int, y: int) -> str:
+        if len(seen) == w * h and seen[y * w + x] != "1" and (x, y) not in vis:
+            return " "
+        c = sm["cells"][y][x]
+        return "v" if c == " " else c
+
+    return {"terrain": sm["terrain"], "grid": {"w": w, "h": h},
+            "cells": ["".join(cell(x, y) for x in range(w)) for y in range(h)], "props": [],
+            "difficult": bm.DIFFICULT_NAMES.get(sm["terrain"], "difficult terrain"),
+            "title": sm.get("title", ""), "visible": [[x, y] for x, y in vis]}

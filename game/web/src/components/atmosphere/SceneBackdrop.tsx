@@ -56,7 +56,7 @@ export function todHour(tod?: string): number {
   return 10;
 }
 
-function computeStyle(scene: Scene, terrain?: string | null): { key: string; background: string } {
+function computeStyle(scene: Scene, terrain?: string | null, art?: string | null): { key: string; background: string } {
   const type = (terrain || scene?.type || "road").toLowerCase();
   const [top, bottom, accent] = PALETTE[type] ?? PALETTE.road;
   const w = weatherKind(scene?.weather);
@@ -70,9 +70,10 @@ function computeStyle(scene: Scene, terrain?: string | null): { key: string; bac
     `linear-gradient(${weatherVeil}, ${weatherVeil})`,
     TEXTURE[type] ?? "none",
     glow,
+    ...(art ? ["linear-gradient(rgba(10, 8, 6, 0.45), rgba(10, 8, 6, 0.7))", `url("${art}") center / cover no-repeat`] : []),
     `linear-gradient(180deg, ${top}, ${bottom})`,
   ].filter((x) => x !== "none");
-  const key = `${type}|${w}|${indoor ? "in" : timeTint(scene?.hour, scene?.time_of_day)}`;
+  const key = `${type}|${w}|${indoor ? "in" : timeTint(scene?.hour, scene?.time_of_day)}|${art ?? ""}`;
   return { key, background: layers.join(", ") };
 }
 
@@ -80,8 +81,19 @@ function computeStyle(scene: Scene, terrain?: string | null): { key: string; bac
  * A scene-reactive background (gradient, texture, vignette) that cross-fades when the place, weather or
  * time changes. Sits behind its parent's content (parent needs position: relative).
  */
-export default function SceneBackdrop({ scene, terrain, subtle = false }: { scene: Scene; terrain?: string | null; subtle?: boolean }) {
-  const next = computeStyle(scene, terrain);
+export default function SceneBackdrop({
+  scene,
+  terrain,
+  subtle = false,
+  art,
+}: {
+  scene: Scene;
+  terrain?: string | null;
+  subtle?: boolean;
+  /** A painted picture of the scene, drawn under the tint. */
+  art?: string | null;
+}) {
+  const next = computeStyle(scene, terrain, art);
   const [layers, setLayers] = useState<{ key: string; background: string; id: number }[]>(() => [{ ...next, id: 0 }]);
   const n = useRef(0);
 

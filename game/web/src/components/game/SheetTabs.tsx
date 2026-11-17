@@ -144,7 +144,13 @@ export function CharacterSheet({
     <div className="char-sheet">
       <div className="sheet-header">
         {manage ? (
-          <PortraitEditor c={c} size="big" upload={(f) => manage(() => api.uploadPortrait(c.id, f))} remove={() => manage(() => api.removePortrait(c.id))} />
+          <PortraitEditor
+            c={c}
+            size="big"
+            upload={(f) => manage(() => api.uploadPortrait(c.id, f))}
+            remove={() => manage(() => api.removePortrait(c.id))}
+            generate={(notes) => manage(() => api.generatePortrait(c.id, notes))}
+          />
         ) : (
           <Portrait c={c} size="big" zoomable />
         )}

@@ -19,6 +19,7 @@ const KEYS: (keyof SettingsPatch)[] = [
   "dm_engine",
   "dm_model",
   "discord_webhook",
+  "ai_art",
 ];
 
 export default function HostSettingsModal({ onClose }: { onClose: () => void }) {
@@ -70,6 +71,17 @@ export default function HostSettingsModal({ onClose }: { onClose: () => void }) 
     >
       <div className="create-game">
         <p className="muted small">Pace and table settings can change at any time. New timers apply from the next phase.</p>
+        <fieldset>
+          <legend>AI art</legend>
+          <label className="toggle">
+            <input type="checkbox" checked={s.ai_art ?? true} onChange={(e) => set("ai_art", e.target.checked)} />
+            <span>Paint scenes and monsters with my Grok (xAI) key</span>
+          </label>
+          <div className="muted small">
+            Needs a Grok key in your Settings. About $0.02 a picture, at most 60 per game; pictures are reused when a scene or
+            monster comes back.
+          </div>
+        </fieldset>
         <fieldset>
           <legend>Live session</legend>
           <label className="toggle">

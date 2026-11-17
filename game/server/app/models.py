@@ -32,6 +32,9 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String)
     api_key_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
     api_key_last4: Mapped[str | None] = mapped_column(String, nullable=True)
+    # xAI (Grok) API key, encrypted like the Claude key; only the last 4 characters are ever shown
+    xai_key_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
+    xai_key_last4: Mapped[str | None] = mapped_column(String, nullable=True)
     email: Mapped[str | None] = mapped_column(String, nullable=True)
     notify_email: Mapped[bool] = mapped_column(Boolean, default=False)
     notify_push: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -103,6 +106,8 @@ class Game(Base):
     state: Mapped[dict] = mapped_column(JSON, default=dict)
     summary: Mapped[str] = mapped_column(Text, default="")
     dm_busy: Mapped[bool] = mapped_column(Boolean, default=False)
+    # new AI pictures paid for in this game (its own column: a DM turn saving the state can't overwrite it)
+    art_count: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 

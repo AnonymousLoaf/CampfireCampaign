@@ -36,6 +36,7 @@ function TokenCard({ token, from, x, y, isActor, onClose }: { token: Token; from
   const dist = from && from.id !== token.id ? distanceFt(from, token) : null;
   return (
     <div className="token-card" ref={ref} style={pos} role="dialog" aria-label={token.name}>
+      {token.kind === "monster" && token.portrait_url && <img className="token-card-art" src={token.portrait_url} alt="" />}
       <div className="token-card-head">
         <span className="char-dot" style={{ background: token.color }} />
         <strong>{token.name}</strong>
@@ -59,6 +60,10 @@ function TokenCard({ token, from, x, y, isActor, onClose }: { token: Token; from
           )}
           {token.hp_state === "down" && <span className="badge red">Down</span>}
           {token.hp_state === "dead" && <span className="badge red">Dead</span>}
+        </div>
+      ) : token.kind === "npc" ? (
+        <div className="token-card-stats">
+          <span className="badge">Bystander</span>
         </div>
       ) : (
         <div className="token-card-stats">
@@ -135,8 +140,7 @@ export default function BattleMap({
   useEffect(() => {
     const ctx = getCtx(canvasRef.current);
     if (!ctx) return;
-    ctx.fillStyle = "#0d0b09";
-    ctx.fillRect(0, 0, size.w, size.h);
+    ctx.clearRect(0, 0, size.w, size.h);
 
     for (let y = 0; y < h; y++) {
       const row = encounter.cells[y] ?? "";
@@ -387,7 +391,7 @@ export default function BattleMap({
       {hoverTok && interactive && !inspected && (
         <div className="map-overlay top-left">
           <span className="map-chip">
-            {hoverTok.name} · {hoverTok.kind === "pc" ? (hoverTok.hp !== null && hoverTok.hp_max !== null ? `HP ${hoverTok.hp}/${hoverTok.hp_max}` : hoverTok.hp_state) : WOUNDS[hoverTok.hp_state] ?? hoverTok.hp_state}
+            {hoverTok.name} · {hoverTok.kind === "npc" ? "bystander" : hoverTok.kind === "pc" ? (hoverTok.hp !== null && hoverTok.hp_max !== null ? `HP ${hoverTok.hp}/${hoverTok.hp_max}` : hoverTok.hp_state) : WOUNDS[hoverTok.hp_state] ?? hoverTok.hp_state}
             {hoverTok.conditions.length ? ` · ${hoverTok.conditions.join(", ")}` : ""}
           </span>
         </div>

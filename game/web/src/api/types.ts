@@ -19,6 +19,8 @@ export interface Me {
   display_name: string;
   has_api_key: boolean;
   api_key_last4: string | null;
+  has_xai_key?: boolean;
+  xai_key_last4?: string | null;
   // M3
   email?: string | null;
   notify?: NotifyPrefs;
@@ -467,6 +469,8 @@ export interface GameSettings {
   dm_engine: "offline" | "claude_code" | "api_key";
   dm_model: string;
   discord_webhook: string | null;
+  /** Paint scenes and monsters with the host's Grok (xAI) key. */
+  ai_art?: boolean;
 }
 
 /** Fields the host may PATCH on a running game. */
@@ -486,6 +490,7 @@ export type SettingsPatch = Partial<
     | "dm_engine"
     | "dm_model"
     | "discord_webhook"
+    | "ai_art"
   >
 >;
 
@@ -624,7 +629,8 @@ export interface World {
 export interface Token {
   id: string;
   name: string;
-  kind: "pc" | "monster";
+  /** npc: a friendly bystander on a map made from a scene map (not in the fight). */
+  kind: "pc" | "monster" | "npc";
   character_id: string | null;
   x: number;
   y: number;
@@ -758,6 +764,8 @@ export interface GameView {
   encounter: Encounter | null;
   /** The DM's map of the party's immediate surroundings (outside combat), fogged to what the party can see. */
   scene_map?: Encounter | null;
+  /** A painted picture of the current scene (host's Grok key), shown behind the story and the maps. */
+  scene_art?: string | null;
   shop: Shop | null;
   npcs: { name: string; role: string; attitude: string; notes: string }[];
   quests: { title: string; status: "active" | "done" | "failed"; notes: string }[];
