@@ -84,6 +84,7 @@ export default function BattleMap({
   viewerTokenId,
   interactive = true,
   portraits,
+  backdrop = false,
 }: {
   encounter: Encounter;
   /** Whose turn it is — drawn with a gold ring so everyone can see. */
@@ -94,7 +95,10 @@ export default function BattleMap({
   interactive?: boolean;
   /** character_id → portrait URL; drawn clipped inside PC token circles. */
   portraits?: Record<string, string | null | undefined>;
+  /** A painting sits behind the map: draw the floor see-through and offer a button to peek at it. */
+  backdrop?: boolean;
 }) {
+  const [peek, setPeek] = useState(false);
   const { wrapRef, canvasRef, size } = useCanvasSize();
   // Preload portraits; redraw once each image arrives.
   const [imgTick, setImgTick] = useState(0);
@@ -152,8 +156,10 @@ export default function BattleMap({
         if (c === "v") {
           // Scene maps: open air / a drop the party can see into (unlike blank fog).
           // Flat and dark with no texture or grid, so it reads as empty space (not floor, not rungs).
+          ctx.globalAlpha = backdrop ? 0.45 : 1;
           ctx.fillStyle = "#121722";
           ctx.fillRect(px, py, cell, cell);
+          ctx.globalAlpha = 1;
           // Where the drop meets solid ground, shade the edge so the lip is visible.
           ctx.fillStyle = "rgba(0,0,0,0.35)";
           const row2 = encounter.cells;
@@ -162,9 +168,12 @@ export default function BattleMap({
           if (x < w - 1 && !"v ".includes(row[x + 1] ?? " ")) ctx.fillRect(px + cell - Math.max(2, cell * 0.12), py, Math.max(2, cell * 0.12), cell);
           continue;
         }
+        // With a painting behind the map, the ground is see-through; walls, doors, obstacles and tokens stay solid.
+        ctx.globalAlpha = backdrop && c !== "#" ? 0.72 : 1;
         ctx.fillStyle = (x + y) % 2 ? style.floor : style.floorAlt;
         ctx.fillRect(px, py, cell, cell);
         if (c !== "#") decorateFloor(ctx, encounter.terrain, px, py, cell, x, y);
+        ctx.globalAlpha = 1;
         if (c === "#") {
           ctx.fillStyle = style.wall;
           ctx.fillRect(px, py, cell, cell);
@@ -225,7 +234,7 @@ export default function BattleMap({
       inTemplate: false,
     }, portraitFor(t));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [encounter, size, cell, ox, oy, w, h, style, propMap, actorTokenId, inspect?.id, hover, canvasRef, portraits, imgTick]);
+  }, [encounter, size, cell, ox, oy, w, h, style, propMap, actorTokenId, inspect?.id, hover, canvasRef, portraits, imgTick, backdrop]);
 
   const squareAt = (e: { clientX: number; clientY: number }) => {
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -361,9 +370,21 @@ export default function BattleMap({
         style={{
           cursor: drag.current?.moved ? "grabbing" : interactive && hoverTok && hoverTok.hp_state !== "dead" ? "pointer" : "grab",
           touchAction: "none",
+          opacity: peek ? 0.06 : 1,
+          transition: "opacity 0.25s",
         }}
       />
       <div className="map-overlay bottom-right">
+        {backdrop && (
+          <button
+            className={`icon-btn ${peek ? "active" : ""}`}
+            title={peek ? "Show the map again" : "Fade the map to see the painting"}
+            aria-pressed={peek}
+            onClick={() => setPeek((v) => !v)}
+          >
+            👁
+          </button>
+        )}
         <button className="icon-btn" title="Zoom in" onClick={() => zoomAt(size.w / 2, size.h / 2, vp.z * 1.25)}>
           ＋
         </button>
@@ -374,7 +395,7 @@ export default function BattleMap({
           ⤢
         </button>
       </div>
-      {(encounter.labels ?? []).map((l) => (
+      {!peek && (encounter.labels ?? []).map((l) => (
         <span
           key={`${l.x},${l.y},${l.label}`}
           className="scene-label"
@@ -388,7 +409,7 @@ export default function BattleMap({
           <span className="map-chip small">{encounter.title}</span>
         </div>
       )}
-      {hoverTok && interactive && !inspected && (
+      {!peek && hoverTok && interactive && !inspected && (
         <div className="map-overlay top-left">
           <span className="map-chip">
             {hoverTok.name} · {hoverTok.kind === "npc" ? "bystander" : hoverTok.kind === "pc" ? (hoverTok.hp !== null && hoverTok.hp_max !== null ? `HP ${hoverTok.hp}/${hoverTok.hp_max}` : hoverTok.hp_state) : WOUNDS[hoverTok.hp_state] ?? hoverTok.hp_state}
@@ -396,7 +417,7 @@ export default function BattleMap({
           </span>
         </div>
       )}
-      {hoverTerrain && (
+      {!peek && hoverTerrain && (
         <div className="map-overlay top-left">
           <span className="map-chip">{hoverTerrain}</span>
         </div>

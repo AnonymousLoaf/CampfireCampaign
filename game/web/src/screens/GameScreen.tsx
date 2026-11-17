@@ -398,7 +398,7 @@ function GameLoaded({
               className="map-area"
               style={
                 view.scene_art && mapTab !== "world"
-                  ? { backgroundImage: `linear-gradient(rgba(13, 11, 9, 0.55), rgba(13, 11, 9, 0.7)), url("${view.scene_art}")`, backgroundSize: "cover", backgroundPosition: "center" }
+                  ? { backgroundImage: `linear-gradient(rgba(13, 11, 9, 0.3), rgba(13, 11, 9, 0.42)), url("${view.scene_art}")`, backgroundSize: "cover", backgroundPosition: "center" }
                   : undefined
               }
             >
@@ -409,10 +409,10 @@ function GameLoaded({
                   <div className="map-empty muted">The world map appears when the game starts.</div>
                 ))}
               {mapTab === "scene" && view.scene_map && (
-                <BattleMap encounter={view.scene_map} portraits={portraits} viewerTokenId={view.scene_map.my_token_id} interactive />
+                <BattleMap encounter={view.scene_map} portraits={portraits} viewerTokenId={view.scene_map.my_token_id} interactive backdrop={!!view.scene_art} />
               )}
               {mapTab === "battle" && enc && (
-                <BattleMap encounter={enc} portraits={portraits} actorTokenId={enc.turn.actor_id} viewerTokenId={viewerTokenId} interactive />
+                <BattleMap encounter={enc} portraits={portraits} actorTokenId={enc.turn.actor_id} viewerTokenId={viewerTokenId} interactive backdrop={!!view.scene_art} />
               )}
             </div>
     </section>
