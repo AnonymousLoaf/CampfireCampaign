@@ -318,7 +318,7 @@ function GameLoaded({
   const feedBusy = view.dm.busy || view.phase.type === "dm";
   const feedEl = (
     <div className="feed-wrap atmos">
-      <SceneBackdrop scene={view.scene} terrain={enc?.terrain ?? null} />
+      <SceneBackdrop scene={view.scene} terrain={enc?.terrain ?? null} art={view.scene_art} />
       {!isMobile && (
       <div className="feed-sky">
         <SkyStrip scene={enc ? { ...view.scene, type: enc.terrain } : view.scene} height={isMobile ? 40 : 52} />
@@ -394,7 +394,14 @@ function GameLoaded({
                 </button>
               )}
             </div>
-            <div className="map-area">
+            <div
+              className="map-area"
+              style={
+                view.scene_art && mapTab !== "world"
+                  ? { backgroundImage: `linear-gradient(rgba(13, 11, 9, 0.55), rgba(13, 11, 9, 0.7)), url("${view.scene_art}")`, backgroundSize: "cover", backgroundPosition: "center" }
+                  : undefined
+              }
+            >
               {mapTab === "world" &&
                 (view.world ? (
                   <WorldMap world={view.world} locationName={view.location?.name} interactive />
@@ -456,7 +463,7 @@ function GameLoaded({
   return (
     <GameContext.Provider value={ctx}>
       <div className={`game-screen atmos ${isMobile ? "mobile" : ""}`}>
-        <SceneBackdrop scene={view.scene} terrain={enc?.terrain ?? null} subtle />
+        <SceneBackdrop scene={view.scene} terrain={enc?.terrain ?? null} subtle art={view.scene_art} />
         <GameHeader onSettings={() => setModal("settings")} onTv={() => setModal("tv")} />
         {view.phase.error && (
           <div className="banner error">

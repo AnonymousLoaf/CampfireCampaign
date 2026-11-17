@@ -85,7 +85,7 @@ function TvLayout({ view }: { view: GameView }) {
 
   return (
     <div className="tv atmos">
-      <SceneBackdrop scene={view.scene} terrain={enc?.terrain ?? null} />
+      <SceneBackdrop art={view.scene_art} scene={view.scene} terrain={enc?.terrain ?? null} />
       <header className="tv-header">
         <SkyStrip scene={enc ? { ...view.scene, type: enc.terrain } : view.scene} height={96} className="tv-sky" />
         <div className="tv-header-text">

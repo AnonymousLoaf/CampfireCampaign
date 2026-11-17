@@ -1670,7 +1670,8 @@ def view(enc: dict, chars: dict, controls: list[str], prefer: str | None = None)
             tokens.append({"id": t["id"], "name": t["name"], "kind": "monster", "character_id": None,
                            "x": t["x"], "y": t["y"], "hp": None, "hp_max": None, "hp_state": hp_state(t, chars),
                            "ac": None, "conditions": t["conditions"], "speed": t["speed"], "size": 1, "color": t["color"],
-                           "done": bool(t.get("done")), **flags})
+                           "done": bool(t.get("done")),
+                           "portrait_url": f"/api/files/art/{t['art']}" if t.get("art") else None, **flags})
     actable = [f"pc-{c}" for c in ([prefer] if prefer else []) + controls if can_act(enc, f"pc-{c}", chars)]
     mine = actable[0] if actable else None
     reach: list = []

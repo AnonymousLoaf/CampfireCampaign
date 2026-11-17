@@ -415,6 +415,62 @@ async def upload_portrait(cid: str, image: UploadFile = File(...), u: User = Dep
     return view
 
 
+class GeneratePortraitBody(BaseModel):
+    notes: str = Field(default="", max_length=600)
+
+
+@router.post("/characters/{cid}/portrait/generate")
+async def generate_portrait(cid: str, body: GeneratePortraitBody, u: User = Depends(current_user)):
+    """Paint a portrait with my Grok (xAI) key from the character's race, class and a short description."""
+    import shutil
+
+    from .game import art
+    if not u.xai_key_enc:
+        raise HTTPException(400, "save a Grok (xAI) API key in Settings first")
+    db = SessionLocal()
+    try:
+        c = db.get(Character, cid)
+        if not c or c.owner_id != u.id:
+            raise HTTPException(404, "character not found")
+        v = ch.view(c.id, c.owner_id, c.game_id, c.sheet)
+        prompt = art.character_prompt(c.sheet, v.get("race") or "", v.get("class_name") or v.get("class") or "",
+                                      body.notes)
+    finally:
+        db.close()
+    import secrets as _s
+    prompt += f" Variation {_s.token_hex(3)}."  # asking again gives a new picture, not the cached one
+    try:
+        art_file = await art.generate(decrypt_secret(u.xai_key_enc), prompt, "1:1", 640)
+    except art.ArtError as e:
+        raise HTTPException(502, str(e))
+    PORTRAIT_DIR.mkdir(parents=True, exist_ok=True)
+    name = secrets.token_urlsafe(16) + ".webp"
+    shutil.copyfile(art.ART_DIR / art_file, PORTRAIT_DIR / name)
+    (art.ART_DIR / art_file).unlink(missing_ok=True)
+    old: dict = {}
+
+    def fn(sheet: dict) -> None:
+        old["name"] = sheet.get("portrait")
+        sheet["portrait"] = name
+        if body.notes.strip():
+            sheet["appearance"] = body.notes.strip()[:600]
+    view = await _edit_character(u, cid, fn)
+    if old.get("name"):
+        (PORTRAIT_DIR / old["name"]).unlink(missing_ok=True)
+    return view
+
+
+@router.get("/files/art/{name}")
+def get_art(name: str):
+    from .game.art import ART_DIR
+    if not re.fullmatch(r"[0-9a-f]{24}\.webp", name):
+        raise HTTPException(404, "not found")
+    path = ART_DIR / name
+    if not path.exists():
+        raise HTTPException(404, "not found")
+    return FileResponse(path, media_type="image/webp", headers={"Cache-Control": "public, max-age=31536000, immutable"})
+
+
 @router.delete("/characters/{cid}/portrait")
 async def delete_portrait(cid: str, u: User = Depends(current_user)):
     old: dict = {}

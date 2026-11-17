@@ -14,6 +14,7 @@ from datetime import timedelta
 
 from sqlalchemy import select
 
+from . import art
 from ..config import DEFAULT_MODEL
 from ..db import SessionLocal
 from ..dm import engines, prompt
@@ -629,6 +630,7 @@ async def run_dm(game_id: str) -> None:
             ctx.save()
             await changed(ctx)
             await notify_phase(ctx)
+            spawn(art.refresh_game_art(game_id))  # paint the scene / new monsters in the background (host's Grok key)
         except Exception:
             log.exception("saving DM result failed for %s", game_id)
             db.rollback()

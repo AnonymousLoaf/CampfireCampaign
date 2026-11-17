@@ -88,6 +88,8 @@ export const api = {
   removeApiKey: () => del<Me>("/me/api-key"),
   setXaiKey: (key: string) => put<Me>("/me/xai-key", { key }),
   removeXaiKey: () => del<Me>("/me/xai-key"),
+  generatePortrait: (characterId: string, notes: string) =>
+    post<CharacterView>(`/characters/${characterId}/portrait/generate`, { notes }),
   meta: () => get<Meta>("/meta"),
   setNotifications: (p: NotificationsPatch) => put<Me>("/me/notifications", p),
   pushKey: () => get<{ public_key: string }>("/push/key"),

@@ -45,6 +45,10 @@ export default function CharacterCard({
             await api.removePortrait(c.id);
             onChanged();
           }}
+          generate={async (notes) => {
+            await api.generatePortrait(c.id, notes);
+            onChanged();
+          }}
         />
       ) : (
         <Portrait c={c} />
