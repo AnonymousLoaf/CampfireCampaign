@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { getPrefs, prefersReducedMotion } from "../util/prefs";
 import type { DiceTable, DieSpec, Sides } from "../dice/physicsDice";
+import { api } from "../api/client";
+
+/** Tell the server when the dice fail on a device, so problems nobody can see from here get fixed. */
+function report(kind: string, message = ""): void {
+  api.clientLog(`dice:${kind}`, message).catch(() => undefined);
+}
 
 export interface DiceShow {
   /** "attack" shows Hit/Miss instead of Success/Failure; "damage" / "heal" are plain totals of any dice. */
@@ -158,8 +164,11 @@ export default function DiceRoller({ variant = "game" }: { variant?: "game" | "t
           && !new URLSearchParams(location.search).has("forcemotion");
         finish(await table.current.throw(specs, still));
       } catch (e) {
-        failed.current = true; // no 3D here: just show the result
-        setDiceProblem(e instanceof Error ? e.message : String(e));
+        report("error", e instanceof Error ? `${e.name}: ${e.message} | ${(e.stack ?? "").slice(0, 300)}` : String(e));
+        if (!table.current) {
+          failed.current = true; // the 3D dice can't start here: from now on just show the result
+          setDiceProblem(e instanceof Error ? e.message : String(e));
+        }
         finish(centre());
       }
     })();

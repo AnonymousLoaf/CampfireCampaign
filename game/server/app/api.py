@@ -164,6 +164,29 @@ def delete_xai_key(u: User = Depends(current_user), db: Session = Depends(get_db
     return me_dict(u)
 
 
+class ClientLogBody(BaseModel):
+    kind: str = Field(max_length=40)
+    message: str = Field(default="", max_length=500)
+
+
+CLIENT_LOG = DATA_DIR / "client-log.jsonl"
+
+
+@router.post("/client-log")
+def client_log(body: ClientLogBody, request: Request, u: User = Depends(current_user)):
+    """A browser reports how a feature went on its device (the dice), so problems we can't see can be fixed."""
+    try:
+        if CLIENT_LOG.exists() and CLIENT_LOG.stat().st_size > 2_000_000:
+            CLIENT_LOG.replace(CLIENT_LOG.with_suffix(".old.jsonl"))
+        with CLIENT_LOG.open("a", encoding="utf-8") as f:
+            f.write(json.dumps({"ts": datetime.now(timezone.utc).isoformat(timespec="seconds"), "user": u.id,
+                                "kind": body.kind, "message": body.message,
+                                "ua": (request.headers.get("user-agent") or "")[:200]}) + "\n")
+    except OSError:
+        pass
+    return {"ok": True}
+
+
 @router.get("/meta")
 def meta(u: User = Depends(current_user)):
     return {"engines": {"offline": True, "claude_code": claude_cli_available(), "api_key": bool(u.api_key_enc)},

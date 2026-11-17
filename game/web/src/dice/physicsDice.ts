@@ -403,7 +403,7 @@ export class DiceTable {
 
     // ── play it back ──
     const place = (fi: number) => {
-      const f = frames[Math.min(frames.length - 1, fi)];
+      const f = frames[Math.max(0, Math.min(frames.length - 1, fi))];
       this.meshes.forEach((m, i) => {
         m.position.set(f[i].p[0], f[i].p[1], f[i].p[2]);
         m.quaternion.set(f[i].q[0], f[i].q[1], f[i].q[2], f[i].q[3]);
@@ -431,17 +431,38 @@ export class DiceTable {
       place(frames.length - 1);
       return Promise.resolve(settle());
     }
-    return new Promise((resolve) => {
-      const t0 = performance.now();
-      const tick = (now: number) => {
-        if (this.disposed) return;
-        const fi = Math.floor(((now - t0) / 1000) * 60);
-        place(fi);
-        if (fi >= frames.length - 1) {
+    return new Promise((resolve, reject) => {
+      // The clock starts at the first frame we draw: a frame's timestamp can be a little earlier than
+      // performance.now() was when the throw began, and a negative time must never index the recording.
+      let t0: number | null = null;
+      let done = false;
+      const end = () => {
+        if (done) return;
+        done = true;
+        window.clearTimeout(guard);
+        cancelAnimationFrame(this.raf);
+        try {
+          place(frames.length - 1);
           resolve(settle());
-          return;
+        } catch (e) {
+          reject(e);
         }
-        this.raf = requestAnimationFrame(tick);
+      };
+      // Whatever happens to the animation (a hidden tab, a GPU hiccup), the roll always finishes.
+      const guard = window.setTimeout(end, (frames.length / 60) * 1000 + 2500);
+      const tick = (now: number) => {
+        if (this.disposed || done) return;
+        try {
+          if (t0 === null) t0 = now;
+          const fi = Math.max(0, Math.floor(((now - t0) / 1000) * 60));
+          place(fi);
+          if (fi >= frames.length - 1) return end();
+          this.raf = requestAnimationFrame(tick);
+        } catch (e) {
+          done = true;
+          window.clearTimeout(guard);
+          reject(e);
+        }
       };
       this.raf = requestAnimationFrame(tick);
     });
