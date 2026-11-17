@@ -433,8 +433,7 @@ async def generate_portrait(cid: str, body: GeneratePortraitBody, u: User = Depe
         if not c or c.owner_id != u.id:
             raise HTTPException(404, "character not found")
         v = ch.view(c.id, c.owner_id, c.game_id, c.sheet)
-        prompt = art.character_prompt(c.sheet, v.get("race") or "", v.get("class_name") or v.get("class") or "",
-                                      body.notes)
+        prompt = art.character_prompt(c.sheet, v, body.notes)
     finally:
         db.close()
     import secrets as _s
@@ -452,8 +451,6 @@ async def generate_portrait(cid: str, body: GeneratePortraitBody, u: User = Depe
     def fn(sheet: dict) -> None:
         old["name"] = sheet.get("portrait")
         sheet["portrait"] = name
-        if body.notes.strip():
-            sheet["appearance"] = body.notes.strip()[:600]
     view = await _edit_character(u, cid, fn)
     if old.get("name"):
         (PORTRAIT_DIR / old["name"]).unlink(missing_ok=True)

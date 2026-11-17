@@ -127,13 +127,53 @@ def monster_prompt(t: dict) -> str:
             "fantasy, head and shoulders, facing the viewer, menacing, dark background. " + STYLE)
 
 
-def character_prompt(sheet: dict, race: str, cls: str, notes: str = "") -> str:
-    looks = notes.strip() or (sheet.get("appearance") or "").strip()
-    back = (sheet.get("backstory") or "").strip()[:300]
-    return (f"Character portrait of {sheet.get('name', 'an adventurer')}, a {race} {cls} adventurer, head and "
-            "shoulders, facing the viewer, heroic. "
-            + (f"Appearance: {looks[:400]}. " if looks else "")
-            + (f"Background: {back}. " if back and not looks else "")
+def npc_prompt(n: dict, tone: str = "heroic") -> str:
+    role = (n.get("role") or "").strip()
+    notes = (n.get("notes") or "").strip()[:300]
+    return (f"Character portrait of {n['name']}" + (f", {role}" if role else "") + ", a person in a "
+            f"Dungeons-and-Dragons-style fantasy world, head and shoulders, facing the viewer. "
+            + (f"What we know of them: {notes}. " if notes else "") + f"Mood: {tone}. " + STYLE)
+
+
+def npc_art_by_name(npcs: list) -> dict[str, str]:
+    """lower-case NPC name -> portrait URL, for the NPCs that have one."""
+    return {n["name"].strip().lower(): art_url(n["art"]) for n in npcs or [] if n.get("art") and n.get("name")}
+
+
+def portrait_for(name: str, by_name: dict[str, str]) -> str | None:
+    """Match a map token's name to a journal NPC: exact, else one name inside the other ("Vane" / "Captain Ilsa Vane")."""
+    k = (name or "").strip().lower()
+    if not k:
+        return None
+    if k in by_name:
+        return by_name[k]
+    for n, url in by_name.items():
+        if len(k) >= 3 and (k in n or n in k):
+            return url
+    return None
+
+
+def character_prompt(sheet: dict, v: dict, notes: str = "") -> str:
+    """A portrait prompt from the character sheet itself (`v` is its view); `notes` adds anything the player wants."""
+    race = v.get("race") or ""
+    if v.get("subrace"):
+        race = f"{race} ({v['subrace']})"
+    anc = (sheet.get("ancestry") or {}).get("name") if isinstance(sheet.get("ancestry"), dict) else None
+    cls = v.get("class") or "adventurer"
+    if v.get("subclass"):
+        cls = f"{cls} ({v['subclass']})"
+    lvl = int(v.get("level") or 1)
+    seasoned = "a fresh-faced" if lvl <= 2 else "a seasoned" if lvl <= 8 else "a legendary"
+    gear = [i["name"] for i in v.get("inventory") or [] if i.get("equipped")][:5]
+    back = (v.get("backstory") or "").strip()[:400]
+    extra = notes.strip()[:600]
+    return (f"Character portrait of {v.get('name') or 'an adventurer'}, {seasoned} {race} {cls} adventurer"
+            + (f" with {anc.lower()} dragon ancestry" if anc else "") + ", head and shoulders, facing the viewer. "
+            + (f"Background: {v['background']}. " if v.get("background") else "")
+            + (f"Temperament: {v['alignment']}. " if v.get("alignment") else "")
+            + (f"Wearing and carrying: {', '.join(gear)}. " if gear else "")
+            + (f"Their story: {back}. " if back else "")
+            + (f"Also: {extra}. " if extra else "")
             + STYLE)
 
 
@@ -189,6 +229,10 @@ async def refresh_game_art(game_id: str) -> None:
                 p = monster_prompt(t)
                 if not any(j[2] == p for j in jobs):
                     jobs.append(("monster", t["monster_index"], p, "1:1"))
+        for n in ctx.state.get("npcs") or []:  # everyone the party has met gets a face, once
+            if n.get("name") and not n.get("art"):
+                p = npc_prompt(n, ctx.settings.get("tone", "heroic"))
+                jobs.append(("npc", n["name"], p, "1:1"))
     finally:
         db.close()
 
@@ -216,6 +260,10 @@ async def refresh_game_art(game_id: str) -> None:
             for what, ident, name in results:
                 if what == "scene":
                     ctx.state["scene_art"] = {"sig": ident, "name": name}
+                elif what == "npc":
+                    for n in ctx.state.get("npcs") or []:
+                        if n.get("name") == ident:
+                            n["art"] = name
                 else:
                     for t in ((ctx.encounter or {}).get("tokens") or {}).values():
                         if t.get("monster_index") == ident:

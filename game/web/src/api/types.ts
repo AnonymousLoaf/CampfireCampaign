@@ -767,7 +767,7 @@ export interface GameView {
   /** A painted picture of the current scene (host's Grok key), shown behind the story and the maps. */
   scene_art?: string | null;
   shop: Shop | null;
-  npcs: { name: string; role: string; attitude: string; notes: string }[];
+  npcs: { name: string; role: string; attitude: string; notes: string; portrait_url?: string | null }[];
   quests: { title: string; status: "active" | "done" | "failed"; notes: string }[];
   log: LogEntry[];
   dm: { engine: string; model: string; busy: boolean };
