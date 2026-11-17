@@ -39,3 +39,26 @@ It exits 1 when a check fails.
 python tools/playtest.py                       # offline scripted DM: free, ~20 s (also run by the test suite)
 python tools/playtest.py --engine claude_code  # the real Claude Code DM on this PC (uses your Claude plan)
 ```
+
+## Character voices (Kokoro)
+
+Narration is read aloud in a voice per character. The DM's narrator has its own voice, and each NPC and player
+character gets a stable recipe: a blend of two Kokoro voices, a speed and a pitch. Ancestry nudges the recipe:
+dwarves come out deeper, halflings and gnomes higher. The recipes are saved in the game state under `voices`.
+The audio is made once on the host PC after each DM turn and shared with everyone; the files live in
+`data/voice/`. Browsers fall back to their own built-in voice if the audio isn't ready within 15 seconds.
+
+Setup on the host:
+
+```
+pip install -r requirements-voices.txt
+```
+
+Then put these two files in `game/server/data/tts/`, both from the kokoro-onnx `model-files-v1.0` release on
+GitHub:
+
+- `kokoro-v1.0.fp16.onnx`
+- `voices-v1.0.bin`
+
+With an NVIDIA GPU (CUDA 12 driver) the voices run on the GPU, about 9× faster than real time on an RTX 2060.
+Otherwise they run on the CPU, about 3× real time. Hosts can switch voices off in a game's settings.

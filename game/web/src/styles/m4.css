@@ -1070,3 +1070,20 @@
 .dice-tray .toggle {
   margin-top: 12px;
 }
+
+.voice-tester textarea {
+  width: 100%;
+  font: inherit;
+  background: var(--bg-2);
+  color: var(--text);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  margin-bottom: 8px;
+}
+.voice-tester .field {
+  margin-bottom: 8px;
+}
+.voice-tester input[type="range"] {
+  width: 100%;
+}

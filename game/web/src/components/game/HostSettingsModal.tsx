@@ -20,6 +20,7 @@ const KEYS: (keyof SettingsPatch)[] = [
   "dm_model",
   "discord_webhook",
   "ai_art",
+  "voices",
 ];
 
 export default function HostSettingsModal({ onClose }: { onClose: () => void }) {
@@ -81,6 +82,14 @@ export default function HostSettingsModal({ onClose }: { onClose: () => void }) 
             Needs a Grok key in your Settings. About $0.02 a picture, at most 60 per game; pictures are reused when a scene or
             monster comes back.
           </div>
+        </fieldset>
+        <fieldset>
+          <legend>Voices</legend>
+          <label className="toggle">
+            <input type="checkbox" checked={s.voices ?? true} onChange={(e) => set("voices", e.target.checked)} />
+            <span>Read narration aloud in character voices (made on the host PC; free)</span>
+          </label>
+          <div className="muted small">Each player turns read-aloud on or off for themselves with the 🗣 button.</div>
         </fieldset>
         <fieldset>
           <legend>Live session</legend>

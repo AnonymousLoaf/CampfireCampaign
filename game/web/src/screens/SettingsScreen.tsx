@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { Me } from "../api/types";
 import DiceRoller, { getDiceProblem, onDiceProblem, showDice } from "../components/DiceRoller";
 import SettingsPanel from "../components/lobby/SettingsPanel";
+import VoiceTester from "../components/VoiceTester";
 import { navigate } from "../router";
 import { usePrefs } from "../util/prefs";
 
@@ -104,6 +105,7 @@ export default function SettingsScreen({ me, onMeChange, onLogout }: { me: Me; o
       <main className="lobby-grid settings-grid">
         <div className="muted small settings-who">Signed in as {me.display_name}</div>
         <DiceTray me={me} />
+        <VoiceTester />
         <SettingsPanel me={me} onMeChange={onMeChange} />
       </main>
       <DiceRoller />

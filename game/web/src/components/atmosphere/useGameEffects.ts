@@ -27,6 +27,21 @@ function sidesOf(notation?: string): number {
  */
 export function useGameEffects(view: GameView, opts: { tv?: boolean } = {}) {
   const seen = useRef<{ game: string; ids: Set<string>; maxNum: number } | null>(null);
+  // new narrations waiting for the host PC's voiced audio: id → give-up timer
+  const waiting = useRef(new Map<string, { timer: number }>());
+  useEffect(() => {
+    if (!waiting.current.size) return;
+    for (const e of view.log) {
+      const w = waiting.current.get(String(e.id));
+      const audio = (e.data as { audio?: string } | null)?.audio;
+      if (w && audio) {
+        window.clearTimeout(w.timer);
+        waiting.current.delete(String(e.id));
+        enqueue(String(e.id), audio);
+      }
+    }
+  }, [view.log]);
+  useEffect(() => () => waiting.current.forEach((w) => window.clearTimeout(w.timer)), []);
 
   // Ambience follows the scene (or the battle map's terrain during a fight).
   const terrain = view.encounter?.terrain ?? null;
@@ -163,7 +178,16 @@ export function useGameEffects(view: GameView, opts: { tv?: boolean } = {}) {
           break;
         case "narration":
           if (/\bdoors?\b[^.]*\b(creak|creaks|groans|swings open)\b/i.test(e.text)) sounds.push("door");
-          if ((opts.tv ? prefs.tvAutoRead : prefs.autoRead) && e.text.trim()) enqueue(String(e.id), e.text);
+          if ((opts.tv ? prefs.tvAutoRead : prefs.autoRead) && e.text.trim()) {
+            const id = String(e.id);
+            const audio = (e.data as { audio?: string } | null)?.audio;
+            if (audio) enqueue(id, audio);
+            else if (view.game.settings.voices !== false) {
+              // the host PC voices it in a few seconds; past a minute it's old news, so it isn't read
+              const timer = window.setTimeout(() => waiting.current.delete(id), 60000);
+              waiting.current.set(id, { timer });
+            }
+          }
           break;
       }
     }
