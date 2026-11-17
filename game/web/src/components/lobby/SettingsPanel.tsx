@@ -56,6 +56,8 @@ export default function SettingsPanel({ me, onMeChange }: { me: Me; onMeChange: 
       </form>
       <ErrorText error={saveErr || removeErr} />
 
+      <XaiKeySettings me={me} onMeChange={onMeChange} />
+
       <NotificationSettings me={me} onMeChange={onMeChange} />
 
       <h3>Sound &amp; narration</h3>
@@ -235,5 +237,54 @@ function NotificationSettings({ me, onMeChange }: { me: Me; onMeChange: (m: Me) 
       {msg && <div className="small muted">{msg}</div>}
       <ErrorText error={patchErr || enableErr || disableErr || testErr} />
     </div>
+  );
+}
+
+function XaiKeySettings({ me, onMeChange }: { me: Me; onMeChange: (m: Me) => void }) {
+  const [key, setKey] = useState("");
+  const [save, saving, saveErr] = useAction(async () => {
+    onMeChange(await api.setXaiKey(key.trim()));
+    setKey("");
+  });
+  const [remove, removing, removeErr] = useAction(async () => {
+    onMeChange(await api.removeXaiKey());
+  });
+  return (
+    <>
+      <h3>Grok (xAI) API key</h3>
+      <p className="muted small">
+        Stored encrypted on the server and never shown again, only the last 4 characters. Nothing in the game uses it yet.
+      </p>
+      {me.has_xai_key ? (
+        <div className="row gap center">
+          <span className="key-chip">•••• {me.xai_key_last4}</span>
+          <button className="btn ghost small danger" disabled={removing} onClick={() => void remove()}>
+            Remove key
+          </button>
+        </div>
+      ) : (
+        <div className="muted small">No key saved.</div>
+      )}
+      <form
+        className="row gap"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (key.trim()) void save();
+        }}
+      >
+        <input
+          type="password"
+          placeholder={me.has_xai_key ? "Replace with a new key" : "xai-…"}
+          value={key}
+          onChange={(e) => setKey(e.target.value)}
+          className="grow"
+          autoComplete="off"
+        />
+        <button className="btn" disabled={saving || !key.trim()}>
+          Save
+        </button>
+      </form>
+      <ErrorText error={saveErr || removeErr} />
+    </>
   );
 }

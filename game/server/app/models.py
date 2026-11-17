@@ -32,6 +32,9 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String)
     api_key_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
     api_key_last4: Mapped[str | None] = mapped_column(String, nullable=True)
+    # xAI (Grok) API key, encrypted like the Claude key; only the last 4 characters are ever shown
+    xai_key_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
+    xai_key_last4: Mapped[str | None] = mapped_column(String, nullable=True)
     email: Mapped[str | None] = mapped_column(String, nullable=True)
     notify_email: Mapped[bool] = mapped_column(Boolean, default=False)
     notify_push: Mapped[bool] = mapped_column(Boolean, default=True)

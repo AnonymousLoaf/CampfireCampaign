@@ -19,6 +19,8 @@ export interface Me {
   display_name: string;
   has_api_key: boolean;
   api_key_last4: string | null;
+  has_xai_key?: boolean;
+  xai_key_last4?: string | null;
   // M3
   email?: string | null;
   notify?: NotifyPrefs;

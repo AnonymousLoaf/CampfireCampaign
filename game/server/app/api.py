@@ -60,6 +60,7 @@ def current_user(session: str | None = Cookie(default=None), db: Session = Depen
 def me_dict(u: User) -> dict:
     return {"id": u.id, "username": u.username, "display_name": u.display_name,
             "has_api_key": bool(u.api_key_enc), "api_key_last4": u.api_key_last4,
+            "has_xai_key": bool(u.xai_key_enc), "xai_key_last4": u.xai_key_last4,
             "email": u.email, "notify": {"email": bool(u.notify_email), "push": bool(u.notify_push if u.notify_push is not None else True),
                                          "remind_minutes": u.remind_minutes if u.remind_minutes is not None else 60,
                                          "chat": bool(u.notify_chat)}}
@@ -140,6 +141,25 @@ def put_key(body: KeyBody, u: User = Depends(current_user), db: Session = Depend
 def delete_key(u: User = Depends(current_user), db: Session = Depends(get_db)):
     u.api_key_enc = None
     u.api_key_last4 = None
+    db.commit()
+    return me_dict(u)
+
+
+@router.put("/me/xai-key")
+def put_xai_key(body: KeyBody, u: User = Depends(current_user), db: Session = Depends(get_db)):
+    k = body.key.strip()
+    if not k.startswith("xai-"):
+        raise HTTPException(400, "that doesn't look like an xAI (Grok) API key (they start with xai-)")
+    u.xai_key_enc = encrypt_secret(k)
+    u.xai_key_last4 = k[-4:]
+    db.commit()
+    return me_dict(u)
+
+
+@router.delete("/me/xai-key")
+def delete_xai_key(u: User = Depends(current_user), db: Session = Depends(get_db)):
+    u.xai_key_enc = None
+    u.xai_key_last4 = None
     db.commit()
     return me_dict(u)
 
