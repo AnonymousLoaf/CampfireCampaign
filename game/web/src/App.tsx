@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import SettingsScreen from "./screens/SettingsScreen";
 import { api, ApiError } from "./api/client";
 import type { Me } from "./api/types";
 import { navigate, useRoute } from "./router";
@@ -64,12 +65,12 @@ function SignedInApp() {
   };
 
   if (route.name === "game") return <GameScreen key={route.id} gameId={route.id} me={me} />;
+  if (route.name === "settings") return <SettingsScreen me={me} onMeChange={setMe} onLogout={logout} />;
   if (route.name === "create-character")
     return <CharacterCreator onDone={() => navigate({ name: "lobby" })} onCancel={() => navigate({ name: "lobby" })} />;
   return (
     <LobbyScreen
       me={me}
-      onMeChange={setMe}
       onLogout={logout}
       joinCode={route.name === "join" ? route.code : undefined}
     />

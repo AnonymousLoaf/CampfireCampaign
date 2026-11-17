@@ -139,7 +139,8 @@ export default function DiceRoller({ variant = "game" }: { variant?: "game" | "t
           table.current = new mod.DiceTable(host.current);
         }
         table.current.resize();
-        const still = prefersReducedMotion() && !new URLSearchParams(location.search).has("forcemotion");
+        const still = prefersReducedMotion() && getPrefs().diceMotion !== "always"
+          && !new URLSearchParams(location.search).has("forcemotion");
         finish(await table.current.throw(specs, still));
       } catch {
         failed.current = true; // no WebGL here: just show the result

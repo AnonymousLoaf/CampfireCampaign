@@ -10,17 +10,14 @@ import JoinGameModal from "../components/lobby/JoinGameModal";
 import ImportCharacterModal from "../components/lobby/ImportCharacterModal";
 import CharacterCard from "../components/lobby/CharacterCard";
 import LevelUpModal from "../components/LevelUpModal";
-import SettingsPanel from "../components/lobby/SettingsPanel";
 import MyContentPanel from "../components/custom/MyContentPanel";
 
 export default function LobbyScreen({
   me,
-  onMeChange,
   onLogout,
   joinCode,
 }: {
   me: Me;
-  onMeChange: (m: Me) => void;
   onLogout: () => void;
   joinCode?: string; // from an emailed invite link (#/join/CODE)
 }) {
@@ -102,6 +99,9 @@ export default function LobbyScreen({
         </div>
         <div className="topbar-right">
           <span className="muted">Signed in as {me.display_name}</span>
+          <button className="btn ghost small" onClick={() => navigate({ name: "settings" })} title="Settings, sound and test dice">
+            ⚙ Settings
+          </button>
           <button className="btn ghost small" onClick={onLogout}>
             Sign out
           </button>
@@ -219,7 +219,6 @@ export default function LobbyScreen({
 
         <MyContentPanel />
 
-        <SettingsPanel me={me} onMeChange={(m) => { onMeChange(m); void load(); }} />
       </main>
 
       {levelUpChar && (
