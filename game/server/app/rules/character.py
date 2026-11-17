@@ -532,7 +532,8 @@ def item_view(it: dict) -> dict:
         "weight": rec.get("weight") or custom.get("weight") or 0,
         "value_cp": custom.get("value_cp", rec.get("cost_cp", 0)),
         "damage": rec.get("damage") or "", "ac": rec.get("ac") or "",
-        "properties": [p for p in (rec.get("properties") or []) if p.lower() != "monk"],
+        "properties": list(dict.fromkeys([p for p in (rec.get("properties") or []) if p.lower() != "monk"]
+                                         + [x for x in it.get("extra_properties") or [] if x in HOMEBREW_PROPERTIES])),
         "description": custom.get("description") or rec.get("description") or "",
         "rarity": rec.get("rarity"),
     }
@@ -1238,6 +1239,9 @@ def mastery_of(sheet: dict, weapon_key: str | None) -> str | None:
     return R(sheet).MASTERY.get(weapon_key)
 
 
+HOMEBREW_PROPERTIES = ("Finesse", "Light", "Thrown")  # properties a host may add to a single weapon
+
+
 def attacks(sheet: dict) -> list[dict]:
     ab = sheet["abilities"]
     pb = prof_bonus_of(sheet)
@@ -1247,6 +1251,10 @@ def attacks(sheet: dict) -> list[dict]:
     one_weapon = len([1 for _, r in weapons if not srd.weapon_profile(r)["ranged"]]) == 1
     for it, rec in weapons:
         wp = srd.weapon_profile(rec)
+        extra = [p for p in it.get("extra_properties") or [] if p in HOMEBREW_PROPERTIES]  # a homebrew tweak to one item
+        if extra:
+            wp = {**wp, "properties": list(dict.fromkeys(list(wp["properties"]) + extra)),
+                  "finesse": wp["finesse"] or "Finesse" in extra}
         s, d = mod(ab["STR"]), mod(ab["DEX"])
         finesse = wp["finesse"] or (monk and _is_monk_weapon(rec))
         use = d if wp["ranged"] or (finesse and d > s) else s
@@ -1266,7 +1274,7 @@ def attacks(sheet: dict) -> list[dict]:
             bonus_dmg += 2
         dmg = f"{dice}{bonus_dmg:+d}" if bonus_dmg else dice
         long = wp["long_range"] if wp["ranged"] else (wp["thrown_range"][0] if wp["thrown_range"] else None)
-        out.append({"id": it["id"], "name": rec["name"], "to_hit": to_hit, "damage": dmg,
+        out.append({"id": it["id"], "name": it.get("name") or rec["name"], "to_hit": to_hit, "damage": dmg,
                     "damage_type": wp["type"], "range_ft": wp["range"], "long_range_ft": long,
                     "kind": "ranged" if wp["ranged"] else "melee", "properties": wp["properties"],
                     "finesse": finesse, "ammo": _AMMO.get(rec["index"]) if "Ammunition" in wp["properties"] else None,

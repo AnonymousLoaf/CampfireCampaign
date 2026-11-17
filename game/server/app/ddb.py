@@ -104,6 +104,45 @@ def _ddb_features(d: dict, main_class: dict | None) -> list[dict]:
     return uniq
 
 
+# D&D Beyond's own bookkeeping entries: the game shows these itself, so they aren't kept as custom text
+BOOKKEEPING = {"creature type", "size", "speed", "ability score increases", "ability score increase", "languages",
+               "age", "alignment", "proficiencies", "hit points", "equipment"}
+
+
+def norm_name(name: str) -> str:
+    """'Thieves’ Cant' / 'Magic Initiate (Wizard)' / 'Darkvision (60 ft.)' → comparable keys."""
+    n = (name or "").replace("’", "'").replace("‘", "'").lower().strip()
+    return re.sub(r"\s*\(.*\)$", "", n).strip()
+
+
+def is_bookkeeping(name: str) -> bool:
+    n = norm_name(name)
+    return (n in BOOKKEEPING or bool(re.fullmatch(r"core [a-z ]+ traits", n))
+            or n.endswith("ability score improvements"))
+
+
+def known_names(sheet: dict) -> set[str]:
+    """Names the game already covers for this character: its features, feats, and species traits."""
+    have = {norm_name(f["name"]) for f in sheet.get("features") or []} | {norm_name(f) for f in sheet.get("feats") or []}
+    if sheet.get("ruleset") == "2024":
+        sp = ch._species_2024().get(sheet.get("race") or "") or {}
+        traits = {norm_name(t if isinstance(t, str) else t.get("name", "")) for t in sp.get("traits") or []}
+        have |= traits | {f"{t} spells" for t in traits}  # "Elven Lineage Spells": the game grants lineage spells
+    else:
+        r = srd.races().get(sheet.get("race") or "") or {}
+        have |= {norm_name(t.get("name", "") if isinstance(t, dict) else t) for t in r.get("traits") or []}
+    return have
+
+
+def clean_imported(sheet: dict) -> list[str]:
+    """Drop imported custom entries that only repeat what the game already covers; returns the names dropped."""
+    have = known_names(sheet)
+    dropped = [c["name"] for c in sheet.get("custom") or []
+               if c.get("source") == "ddb" and (norm_name(c["name"]) in have or is_bookkeeping(c["name"]))]
+    sheet["custom"] = [c for c in sheet.get("custom") or [] if c["name"] not in dropped or c.get("source") != "ddb"]
+    return dropped
+
+
 def to_sheet(d: dict) -> dict:
     m = _mod()
     ruleset = detect_ruleset(d)
@@ -316,10 +355,10 @@ def to_sheet(d: dict) -> dict:
     sheet["level_target"] = sheet["level"]
 
     # keep everything the game's tables don't cover as custom entries the DM can read
-    have = {f["name"].lower() for f in sheet["features"]} | {f.lower() for f in sheet["feats"]}
+    have = known_names(sheet)
     kept = []
     for f in _ddb_features(d, main) + extra_spells:
-        if f["name"].lower() in have:
+        if norm_name(f["name"]) in have or is_bookkeeping(f["name"]):
             continue
         entry = {"entry_id": "ddb-" + uuid.uuid4().hex[:8], "kind": f["kind"], "name": f["name"][:80],
                  "description": f["description"][:3000], "level": f.get("level"), "data": f.get("data") or {},

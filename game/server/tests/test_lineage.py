@@ -74,3 +74,29 @@ def test_ddb_import_keeps_the_backstory():
     d = _ddb_json(legacy=False)
     d["notes"] = {"backstory": "<p>Raised by <strong>reapers</strong> in the barley fields.</p>"}
     assert ddb.to_sheet(d)["backstory"] == "Raised by reapers in the barley fields."
+
+
+def test_a_homebrew_finesse_sickle_uses_dex_and_allows_sneak_attack():
+    s = ch.create(_payload("2024", "halfling"))
+    s["abilities"].update({"STR": 8, "DEX": 15})
+    sickle = ch.make_item("sickle", 1, True)
+    s["inventory"] = [i for i in s["inventory"] if not i.get("equipped")] + [sickle]
+    plain = next(a for a in ch.attacks(s) if a["weapon_key"] == "sickle")
+    assert not plain["finesse"] and plain["ability_mod"] == -1
+    sickle["extra_properties"] = ["Finesse", "Bogus"]  # only known properties count
+    sickle["name"] = "Sickle (finesse, homebrew)"
+    a = next(a for a in ch.attacks(s) if a["weapon_key"] == "sickle")
+    assert a["finesse"] and a["ability_mod"] == 2 and a["name"] == "Sickle (finesse, homebrew)"
+    assert "Finesse" in a["properties"] and "Bogus" not in a["properties"]
+
+
+def test_import_drops_entries_that_repeat_the_rules_and_keeps_real_extras():
+    d = _ddb_json(legacy=False)
+    d["race"]["racialTraits"] += [{"definition": {"name": n, "description": "<p>x</p>"}}
+                                  for n in ("Size", "Speed", "Creature Type", "Fey Ancestry", "Elven Lineage Spells")]
+    d["feats"] = [{"definition": {"name": "Soldier Ability Score Improvements", "description": "<p>x</p>"}},
+                  {"definition": {"name": "Dark Bargain", "description": "<p>A campaign boon.</p>"}}]
+    kept = {c["name"] for c in ddb.to_sheet(d)["custom"]}
+    assert "Dark Bargain" in kept and "Starlit Grace" in kept
+    assert not kept & {"Size", "Speed", "Creature Type", "Fey Ancestry", "Elven Lineage Spells",
+                       "Soldier Ability Score Improvements"}
