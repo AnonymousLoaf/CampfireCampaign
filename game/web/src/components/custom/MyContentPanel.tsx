@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../../api/client";
-import { ABILITIES, type Ability, type CustomEntry, type CustomEntryInput, type CustomKind, type HomebrewRaceData } from "../../api/types";
+import { ABILITIES, type Ability, type CustomEntry, type CustomEntryInput, type CustomKind, type HomebrewRaceData, type PlotData } from "../../api/types";
 import ErrorText, { useAction } from "../ErrorText";
 
 export const KIND_LABEL: Record<CustomKind, string> = {
@@ -11,6 +11,7 @@ export const KIND_LABEL: Record<CustomKind, string> = {
   background: "Background",
   species_trait: "Species trait",
   race: "Race",
+  plot: "Campaign plot",
 };
 const MAX_RACE_TRAITS = 8;
 const KINDS = Object.keys(KIND_LABEL) as CustomKind[];
@@ -43,7 +44,68 @@ type Draft = {
   bonuses: Record<Ability, string>;
   languages: string;
   traits: { name: string; text: string }[];
+  // plot
+  plot: PlotDraft;
 };
+
+type PlotDraft = {
+  premise: string;
+  opening: string;
+  villain: string;
+  goal: string;
+  ending: string;
+  themes: string;
+  acts: string;
+  secrets: string;
+  twists: string;
+  npcs: { name: string; role: string; secret: string }[];
+};
+const MAX_PLOT_NPCS = 10;
+const EMPTY_PLOT: PlotDraft = {
+  premise: "",
+  opening: "",
+  villain: "",
+  goal: "",
+  ending: "",
+  themes: "",
+  acts: "",
+  secrets: "",
+  twists: "",
+  npcs: [{ name: "", role: "", secret: "" }],
+};
+
+function plotDraft(d: Partial<PlotData>): PlotDraft {
+  const lines = (v: unknown) => (Array.isArray(v) ? v.map(String).join("\n") : typeof v === "string" ? v : "");
+  const npcs = Array.isArray(d.npcs) ? d.npcs.map((n) => ({ name: n.name ?? "", role: n.role ?? "", secret: n.secret ?? "" })) : [];
+  return {
+    premise: d.premise ?? "",
+    opening: d.opening ?? "",
+    villain: d.villain ?? "",
+    goal: d.goal ?? "",
+    ending: d.ending ?? "",
+    themes: d.themes ?? "",
+    acts: lines(d.acts),
+    secrets: lines(d.secrets),
+    twists: lines(d.twists),
+    npcs: npcs.length ? npcs : [{ name: "", role: "", secret: "" }],
+  };
+}
+
+function plotData(p: PlotDraft): PlotData {
+  const lines = (s: string) =>
+    s
+      .split("\n")
+      .map((x) => x.trim())
+      .filter(Boolean);
+  const out: PlotData = { premise: p.premise.trim() };
+  for (const k of ["opening", "villain", "goal", "ending", "themes"] as const) if (p[k].trim()) out[k] = p[k].trim();
+  for (const k of ["acts", "secrets", "twists"] as const) if (lines(p[k]).length) out[k] = lines(p[k]);
+  const npcs = p.npcs
+    .filter((n) => n.name.trim())
+    .map((n) => ({ name: n.name.trim(), ...(n.role.trim() ? { role: n.role.trim() } : {}), ...(n.secret.trim() ? { secret: n.secret.trim() } : {}) }));
+  if (npcs.length) out.npcs = npcs;
+  return out;
+}
 
 const NO_BONUSES: Record<Ability, string> = { STR: "", DEX: "", CON: "", INT: "", WIS: "", CHA: "" };
 
@@ -67,6 +129,7 @@ const EMPTY: Draft = {
   bonuses: { ...NO_BONUSES },
   languages: "Common",
   traits: [{ name: "", text: "" }],
+  plot: EMPTY_PLOT,
 };
 
 function toDraft(e: CustomEntry): Draft {
@@ -88,6 +151,7 @@ function toDraft(e: CustomEntry): Draft {
     skills: Array.isArray(d.skills) ? (d.skills as unknown[]).map(String).join(", ") : s("skills"),
     tool: s("tool"),
     ...(e.kind === "race" ? raceDraft(d as Partial<HomebrewRaceData>) : {}),
+    ...(e.kind === "plot" ? { plot: plotDraft(d as Partial<PlotData>) } : {}),
   };
 }
 
@@ -146,6 +210,9 @@ function toInput(d: Draft): CustomEntryInput {
       traits: d.traits.map((t) => ({ name: t.name.trim(), text: t.text.trim() })).filter((t) => t.name || t.text),
     };
     base.data = { ...data };
+  } else if (d.kind === "plot") {
+    base.level = null;
+    base.data = { ...plotData(d.plot) };
   } else base.data = {};
   return base;
 }
@@ -195,7 +262,9 @@ export default function MyContentPanel() {
           </button>
         )}
       </div>
-      <p className="muted small">{PRIVACY_LINE} Attach entries to a character from its card or sheet.</p>
+      <p className="muted small">
+        {PRIVACY_LINE} Attach entries to a character from its card or sheet; pick a campaign plot when you create a game.
+      </p>
       <ErrorText error={loadErr || removeErr} />
 
       {editing && d && (
@@ -221,7 +290,7 @@ export default function MyContentPanel() {
               <span className="label">Name</span>
               <input value={d.name} onChange={(e) => setD({ name: e.target.value })} maxLength={80} required />
             </label>
-            {d.kind !== "item" && d.kind !== "background" && d.kind !== "race" && (
+            {d.kind !== "item" && d.kind !== "background" && d.kind !== "race" && d.kind !== "plot" && (
               <label className="field narrow">
                 <span className="label">{d.kind === "spell" ? "Spell level" : "Level"}</span>
                 <input type="number" min={0} max={20} value={d.level} placeholder={d.kind === "spell" ? "0 = cantrip" : "optional"} onChange={(e) => setD({ level: e.target.value })} />
@@ -358,16 +427,18 @@ export default function MyContentPanel() {
             </>
           )}
 
+          {d.kind === "plot" && <PlotFields p={d.plot} set={(patch) => setD({ plot: { ...d.plot, ...patch } })} />}
+
           <label className="field">
-            <span className="label">Description (the DM rules from this text)</span>
-            <textarea rows={5} value={d.description} onChange={(e) => setD({ description: e.target.value })} maxLength={4000} />
+            <span className="label">{d.kind === "plot" ? "Anything else the DM should know (optional)" : "Description (the DM rules from this text)"}</span>
+            <textarea rows={d.kind === "plot" ? 3 : 5} value={d.description} onChange={(e) => setD({ description: e.target.value })} maxLength={4000} />
           </label>
           <ErrorText error={saveErr} />
           <div className="row gap">
             <button type="button" className="btn ghost small" onClick={() => setEditing(null)}>
               Cancel
             </button>
-            <button className="btn primary small" disabled={saving || !d.name.trim()}>
+            <button className="btn primary small" disabled={saving || !d.name.trim() || (d.kind === "plot" && !d.plot.premise.trim())}>
               {saving ? "Saving…" : editing.id ? "Save changes" : "Add to my content"}
             </button>
           </div>
@@ -407,5 +478,55 @@ export default function MyContentPanel() {
         </ul>
       )}
     </section>
+  );
+}
+
+/** The campaign plot form: the story's spine the DM steers toward. */
+function PlotFields({ p, set }: { p: PlotDraft; set: (patch: Partial<PlotDraft>) => void }) {
+  const area = (k: keyof Omit<PlotDraft, "npcs">, label: string, placeholder: string, rows = 2, max = 1500) => (
+    <label className="field">
+      <span className="label">{label}</span>
+      <textarea rows={rows} value={p[k]} placeholder={placeholder} maxLength={max} onChange={(e) => set({ [k]: e.target.value })} />
+    </label>
+  );
+  const setNpc = (i: number, patch: Partial<PlotDraft["npcs"][number]>) =>
+    set({ npcs: p.npcs.map((n, j) => (j === i ? { ...n, ...patch } : n)) });
+  return (
+    <div className="stack-tight plot-fields">
+      <p className="muted small">
+        The host picks a plot when creating a game. The DM opens the campaign from it and steers every turn toward its beats, but
+        still follows the players&apos; lead. Players never see it: secrets and twists come out only through play. Only the premise
+        is required.
+      </p>
+      {area("premise", "Premise *", "What's going on when the story starts, and why the party gets pulled in", 3, 2000)}
+      {area("opening", "Opening scene", "How the first session starts")}
+      {area("villain", "Villain or main threat", "Who or what opposes the party")}
+      {area("goal", "What the villain wants", "And what happens if nobody stops them")}
+      {area("acts", "Story beats (one per line, in rough order)", "Investigate the drownings\nFind the sunken temple\nConfront the hag", 4, 6000)}
+      {area("secrets", "Secrets and clues (one per line)", "The mayor made the pact", 3, 5000)}
+      {area("twists", "Twists (one per line)", "The hag is the mayor's sister", 2, 2500)}
+      {area("ending", "Climax and possible endings", "How it could end, for better or worse")}
+      {area("themes", "Themes and mood", "Grief, small-town secrets, creeping dread", 1, 500)}
+      <span className="label">
+        Key NPCs ({p.npcs.length}/{MAX_PLOT_NPCS})
+      </span>
+      {p.npcs.map((n, i) => (
+        <div key={i} className="row gap wrap">
+          <input value={n.name} placeholder="Name" maxLength={60} onChange={(e) => setNpc(i, { name: e.target.value })} />
+          <input className="grow" value={n.role} placeholder="Who they are" maxLength={300} onChange={(e) => setNpc(i, { role: e.target.value })} />
+          <input className="grow" value={n.secret} placeholder="Secret (optional)" maxLength={400} onChange={(e) => setNpc(i, { secret: e.target.value })} />
+          <button type="button" className="btn tiny ghost danger" onClick={() => set({ npcs: p.npcs.filter((_, j) => j !== i) })}>
+            Remove
+          </button>
+        </div>
+      ))}
+      {p.npcs.length < MAX_PLOT_NPCS && (
+        <div>
+          <button type="button" className="btn tiny ghost" onClick={() => set({ npcs: [...p.npcs, { name: "", role: "", secret: "" }] })}>
+            Add NPC
+          </button>
+        </div>
+      )}
+    </div>
   );
 }

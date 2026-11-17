@@ -5,6 +5,7 @@ from ..game.state import Ctx
 from ..rules import character as ch
 from ..rules import shop as shop_rules
 from ..world import hexmap
+from ..game import plot as plot_rules
 
 STORY = {
     "dungeon_crawl": "a dungeon crawl — delves into dangerous places full of traps, monsters and treasure",
@@ -104,6 +105,8 @@ def system_prompt(ctx: Ctx) -> str:
     lines.append(f"- Narration length per turn: about {NARRATION.get(st['narration_length'], '150 words')}.")
     if st.get("content_limits"):
         lines.append(f"- Content limits the table set (never cross these): {st['content_limits']}")
+    if ctx.state.get("plot"):
+        lines += ["", plot_rules.prompt_block(ctx.state["plot"])]
     if ctx.world:
         w = ctx.world
         lines.append("")

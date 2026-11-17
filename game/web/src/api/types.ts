@@ -357,7 +357,21 @@ export interface CharacterView {
   race_traits?: RaceTrait[];
 }
 
-export type CustomKind = "feat" | "feature" | "spell" | "item" | "background" | "species_trait" | "race";
+export type CustomKind = "feat" | "feature" | "spell" | "item" | "background" | "species_trait" | "race" | "plot";
+
+/** `data` of a "plot" custom entry (campaign plot): only the DM and the host ever see it. */
+export interface PlotData {
+  premise: string;
+  opening?: string;
+  villain?: string;
+  goal?: string;
+  ending?: string;
+  themes?: string;
+  acts?: string[];
+  secrets?: string[];
+  twists?: string[];
+  npcs?: { name: string; role?: string; secret?: string }[];
+}
 
 /** A custom entry attached to a character (homebrew or content from a book the player owns). */
 export interface AttachedCustom {
@@ -719,6 +733,9 @@ export interface GameView {
     chat_unseen?: number;
   };
   tv_url?: string | null;
+  /** Host only: the campaign plot picked for this game (its contents stay DM-only). */
+  plot?: { name: string; entry_id: string | null } | null;
+  has_plot?: boolean;
   members: Member[];
   characters: Record<string, CharacterView>;
   phase: Phase;

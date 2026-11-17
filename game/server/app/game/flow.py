@@ -81,6 +81,14 @@ def start_game(ctx: Ctx, uid: str) -> None:
     g.status = "active"
     names = ", ".join(s["name"] for _, s in ctx.party())
     ctx.log("system", f"The adventure begins. Party: {names}.")
+    if ctx.state.get("plot"):
+        queue_dm(ctx, "opening",
+                 "Open the campaign using the host's CAMPAIGN PLOT in your instructions: start from its opening scene "
+                 "(or, if it has none, a strong hook into its premise) in the starting settlement, with a bang aimed at "
+                 "the party. Use name_place to rename 2-4 key places to fit the plot, record the first quest "
+                 "(upsert_quest) and any plot NPC you introduce (upsert_npc, without their secrets), and write the "
+                 "first update_summary. Reveal no secrets or twists yet.")
+        return
     queue_dm(ctx, "opening",
              "Open the campaign. Introduce the starting settlement and set up the story type for this game, with a bang "
              "aimed at the party. Use name_place to give 2-4 key places names and descriptions that fit the story, "

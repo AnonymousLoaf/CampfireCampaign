@@ -24,6 +24,7 @@ from .db import SessionLocal, get_db
 from .game import combat, flow
 from .game.hub import Conn, hub
 from .game import notify
+from .game import plot as plot_rules
 from .game.notify import nudge as send_nudge
 from .game.state import LIVE_EDITABLE, Ctx, build_view, clean_settings, load, lock_for
 from .config import DATA_DIR
@@ -417,7 +418,7 @@ def get_portrait(name: str):
 
 # ── custom content library ──────────────────────────────────────────────────
 
-CUSTOM_KINDS = {"feat", "feature", "spell", "item", "background", "species_trait", "race"}
+CUSTOM_KINDS = {"feat", "feature", "spell", "item", "background", "species_trait", "race", "plot"}
 
 
 class CustomBody(BaseModel):
@@ -445,6 +446,12 @@ def _clean_custom(body: CustomBody) -> dict:
         except ValueError as e:
             raise HTTPException(400, str(e))
         limit = campfire_races.HOMEBREW_DATA_MAX
+    elif body.kind == "plot":  # campaign plot: premise, villain, beats, NPCs, secrets, twists, ending
+        try:
+            data = plot_rules.clean(data)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        limit = plot_rules.PLOT_DATA_MAX
     if len(json.dumps(data)) > limit:
         raise HTTPException(400, "too much extra data")
     return {"kind": body.kind, "name": body.name.strip(), "description": body.description.strip(), "level": body.level,
@@ -501,6 +508,8 @@ async def attach_custom(cid: str, body: AttachBody, u: User = Depends(current_us
             raise HTTPException(404, "entry not found")
         if e.kind == "race":
             raise HTTPException(400, "homebrew races are chosen when you create a character")
+        if e.kind == "plot":
+            raise HTTPException(400, "campaign plots are picked by the host for a game, not added to a character")
         entry = _custom_dict(e)
     finally:
         db.close()
@@ -582,6 +591,17 @@ class CreateGameBody(BaseModel):
     name: str = Field(min_length=1, max_length=60)
     settings: dict = Field(default_factory=dict)
     character_id: str
+    plot_id: str | None = None
+
+
+def _plot_snapshot(db: Session, u: User, entry_id: str) -> dict:
+    e = db.get(CustomEntry, entry_id)
+    if not e or e.user_id != u.id or e.kind != "plot":
+        raise HTTPException(400, "that campaign plot isn't in your content library")
+    try:
+        return plot_rules.snapshot(_custom_dict(e))
+    except ValueError as err:
+        raise HTTPException(400, f"{e.name}: {err}")
 
 
 @router.post("/games")
@@ -597,7 +617,10 @@ async def create_game(body: CreateGameBody, u: User = Depends(current_user), db:
         raise HTTPException(400, "save a Claude API key in Settings first, or pick another DM engine")
     if settings["dm_engine"] == "claude_code" and not claude_cli_available():
         raise HTTPException(400, "Claude Code isn't installed on this computer")
-    g = Game(name=body.name.strip(), host_id=u.id, settings=settings, state={"phase": {"id": 0, "type": "lobby"}})
+    state: dict = {"phase": {"id": 0, "type": "lobby"}}
+    if body.plot_id:
+        state["plot"] = _plot_snapshot(db, u, body.plot_id)
+    g = Game(name=body.name.strip(), host_id=u.id, settings=settings, state=state)
     db.add(g)
     db.flush()
     db.add(Membership(game_id=g.id, user_id=u.id, character_id=c.id, role="host"))
@@ -641,6 +664,31 @@ async def join_game(body: JoinBody, u: User = Depends(current_user), db: Session
     db.commit()
     await flow.changed(g.id, [m.user_id for m in members] + [u.id])
     return {"id": g.id}
+
+
+class PlotBody(BaseModel):
+    entry_id: str | None = None
+
+
+@router.put("/games/{gid}/plot")
+async def set_plot(gid: str, body: PlotBody, u: User = Depends(current_user)):
+    """Host only, before the game starts: pick a campaign plot from your library (or clear it with null)."""
+    db = SessionLocal()
+    try:
+        snap = _plot_snapshot(db, u, body.entry_id) if body.entry_id else None
+    finally:
+        db.close()
+
+    def fn(ctx: Ctx) -> None:
+        if ctx.game.host_id != u.id:
+            raise RulesError("only the host can choose the campaign plot")
+        if ctx.game.status != "lobby":
+            raise RulesError("the plot can only be changed before the game starts")
+        if snap:
+            ctx.state["plot"] = snap
+        else:
+            ctx.state.pop("plot", None)
+    return await mutate(gid, u, fn)
 
 
 def _member(ctx: Ctx, u: User) -> Membership:

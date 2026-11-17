@@ -441,3 +441,16 @@ Out-of-character messages between the people in a game ("table talk"), so a part
 - `GameView.me` gains `last_chat_seen_id: n|null` and `chat_unseen: n` (others' messages after it).
 - WebSocket: members (not TV links) receive `{"type": "chat", "game_id", "message": ChatMessage}` for every post, edit and delete. Leaving or being removed stops it.
 - Notifications: `PUT /me/notifications {notify_chat: bool}` (default off; `me.notify.chat`). Push only, never email; only to members who don't have the game open; at most one per person per game every 10 minutes; nothing during a live session.
+
+# Campaign plots
+
+A host-written story outline, stored as custom content kind `plot`. Its `data`: `premise` (required), optional
+`opening`, `villain`, `goal`, `ending`, `themes`, lists `acts` / `secrets` / `twists` (arrays of strings, or newline
+text), and `npcs` (`[{name, role?, secret?}]`, up to 10). Entry `description` becomes the host's notes for the DM.
+
+- `POST /games` takes an optional `plot_id` (one of your `plot` entries).
+- `PUT /games/{gid}/plot {entry_id | null}`: host only, lobby only; picks or clears the plot.
+
+The plot is snapshotted into the game when picked, so later library edits don't change it. The DM gets it in its
+system prompt (and the opening scene starts from it). In the view, the host sees `plot: {name, entry_id}`; everyone
+sees `has_plot`. The plot's contents never reach players. Plots can't be attached to characters.

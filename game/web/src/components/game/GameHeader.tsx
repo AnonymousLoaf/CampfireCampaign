@@ -4,6 +4,7 @@ import { navigate } from "../../router";
 import { PHASE_LABEL, formatCountdown, useNow } from "../../util/format";
 import { useGame } from "./gameContext";
 import InviteByEmail from "./InviteByEmail";
+import PlotPicker from "./PlotPicker";
 
 export default function GameHeader({ onSettings, onTv }: { onSettings: () => void; onTv: () => void }) {
   const { view, gameId, run } = useGame();
@@ -56,6 +57,7 @@ export default function GameHeader({ onSettings, onTv }: { onSettings: () => voi
           </span>
         )}
         {view.game.status === "lobby" && view.me.role !== "spectator" && <InviteByEmail gameId={gameId} />}
+        {view.game.status === "lobby" && (host ? <PlotPicker /> : view.has_plot && <span className="badge" title="The host wrote this campaign's story. Only the DM knows it.">📜 Custom plot</span>)}
         {host && view.game.status === "lobby" && (
           <button className="btn primary" onClick={() => void run(() => api.start(gameId))}>
             Start game
