@@ -136,7 +136,14 @@ export default function LobbyScreen({
                   <div className="game-row-main">
                     <div className="game-name">
                       {g.name}
-                      {g.my_turn && <span className="badge gold">Your move</span>}
+                      {g.my_turn &&
+                        (g.their_call?.length ? (
+                          <span className="badge" title="The DM asked them; you can add something or pass">
+                            {g.their_call.join(" & ")}&apos;s call
+                          </span>
+                        ) : (
+                          <span className="badge gold">Your move</span>
+                        ))}
                     </div>
                     <div className="muted small">
                       Hosted by {g.host_name} · {g.player_count}/{g.max_players} players

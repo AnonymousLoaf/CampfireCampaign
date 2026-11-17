@@ -230,10 +230,6 @@ class Ctx:
         t = p.get("type")
         req = self.required_users()
         if t == "exploration":
-            if p.get("spotlight") and self.settings.get("input_mode") != "single":
-                # the DM asked specific characters; only their players are required (if any of them still can act)
-                focus = [m.user_id for m in self.members if m.character_id in p["spotlight"] and m.user_id in req]
-                req = focus or req
             return [u for u in req if u not in p.get("submissions", {})]
         if t == "shop":
             return [u for u in req if u not in p.get("ready", [])]
@@ -256,6 +252,17 @@ class Ctx:
                         out.append(who)
             return out
         return []
+
+    def their_call(self, uid: str) -> list[str]:
+        """Exploration: names of the characters the DM's question is for, when it isn't for this player's
+        character. Everyone is still asked; this only labels the round as someone else's call."""
+        p = self.phase
+        if p.get("type") != "exploration" or not p.get("spotlight") or self.settings.get("input_mode") == "single":
+            return []
+        mine = {m.character_id for m in self.members if m.user_id == uid}
+        if mine & set(p["spotlight"]):
+            return []
+        return [self.chars[c]["name"] for c in p["spotlight"] if c in self.chars]
 
     # ── persistence ──
     def save(self) -> None:
@@ -336,6 +343,7 @@ def build_view(db: Session, ctx: Ctx, uid: str | None, tv: bool = False) -> dict
                                 for k, v in subs.items()],
         "pending_rolls": p.get("pending_rolls", []), "error": p.get("error"),
         "spotlight": [ctx.chars[c]["name"] for c in p.get("spotlight") or [] if c in ctx.chars],
+        "their_call": ctx.their_call(uid) if uid else [],
     }
     world = hexmap.view(ctx.world) if ctx.world else None
     enc = ctx.encounter
