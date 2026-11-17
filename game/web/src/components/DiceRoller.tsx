@@ -115,12 +115,21 @@ export default function DiceRoller({ variant = "game" }: { variant?: "game" | "t
         const t = new mod.DiceTable(host.current);
         t.warmUp();
         table.current = t;
+        setDiceProblem(null);
         return t;
       })();
       ready.current.catch((e) => {
+        const msg = e instanceof Error ? e.message : String(e);
+        report("error", e instanceof Error ? `${e.name}: ${msg}` : msg);
+        // "Importing a module script failed" / "Failed to fetch dynamically imported module": this page is
+        // older than the site (it was updated since the page opened). Say so, and try again on the next roll.
+        if (/import|module|fetch|chunk/i.test(msg)) {
+          ready.current = null;
+          setDiceProblem("the game was updated since this page opened, so refresh the page to get the 3D dice");
+          return;
+        }
         failed.current = true; // the 3D dice can't start here: just show results
-        setDiceProblem(e instanceof Error ? e.message : String(e));
-        report("error", e instanceof Error ? `${e.name}: ${e.message}` : String(e));
+        setDiceProblem(msg);
       });
     }
     return ready.current;
