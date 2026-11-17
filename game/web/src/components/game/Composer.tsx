@@ -63,6 +63,11 @@ export function ExplorationComposer() {
       {view.phase.prompt && <div className="dm-prompt">{view.phase.prompt}</div>}
       <Others />
       {single && <div className="speaker-note">🗣 Acting for the whole party</div>}
+      {!single && !!view.phase.spotlight?.length && view.me.user_id && !view.phase.waiting_on.includes(view.me.user_id) && !mine && (
+        <div className="speaker-note">
+          🎯 The DM is waiting on {view.phase.spotlight.join(" and ")}. You can still add an action if you like.
+        </div>
+      )}
       <div className="quick-chips">
         {QUICK.filter((q) => q.label !== "Rest").map((q) => (
           <button key={q.label} className="chip" onClick={() => setText((t) => (t.trim() ? `${t.trim()} ${q.text}` : q.text))}>

@@ -1146,3 +1146,21 @@
     height: 50vh;
   }
 }
+
+/* scene map: labelled spots drawn over the grid */
+.scene-label {
+  position: absolute;
+  transform: translate(-50%, -130%);
+  pointer-events: none;
+  white-space: nowrap;
+  font-size: 0.72rem;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: rgba(13, 11, 9, 0.82);
+  border: 1px solid rgba(216, 169, 74, 0.45);
+  color: var(--gold-2);
+}
+.map-overlay.top-right {
+  top: 8px;
+  right: 8px;
+}

@@ -5,6 +5,7 @@ from ..game.state import Ctx
 from ..rules import character as ch
 from ..rules import shop as shop_rules
 from ..world import hexmap
+from ..world import scenemap
 from ..game import plot as plot_rules
 
 STORY = {
@@ -59,6 +60,13 @@ How the game works:
   street or market square). Pick the map that matches where the fight happens, and a start distance that matches
   the scene: close for a standoff a few steps apart, near for foes across a room or square, far for an ambush seen
   coming.
+- If your narration ends on a decision for only some characters ("Kira, now or never"), call spotlight with their
+  names so the others aren't told it's their move. Otherwise everyone is asked to act.
+- Scene maps: when the party is somewhere its layout matters (an arrival, a standoff, a fork, a climb), draw it with
+  draw_scene_map and keep it current with update_scene_map as people move. Players see only what their characters
+  can see, so it shows them their surroundings without spoiling what's down the other path.
+- Continuity: numbers, distances and positions you've stated are facts. Before narrating, check them against the
+  recent story and the scene map (e.g. don't say "twenty rungs down" and "the forty-third rung" for the same moment).
 - Keep the party's NPC list, quest journal and the story summary (update_summary) current.
 
 What makes a great DM — hard constraints:
@@ -166,6 +174,8 @@ def turn_message(ctx: Ctx, reason: str, body: str, recent: list[tuple[str, str |
         p = ctx.world["party"]
         out.append(f"Party is on the world map at hex ({p['q']},{p['r']}), terrain: "
                    f"{hexmap.BIOME_NAMES[hexmap.biome_at(ctx.world, p['q'], p['r'])]}.")
+    if st.get("scene_map"):
+        out.append(scenemap.describe(st["scene_map"], ctx.party()))
     out.append("")
     out.append("## Party")
     for cid, s in ctx.party():

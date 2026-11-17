@@ -15,6 +15,7 @@ from ..rules.character import RulesError
 from ..rules.classes import ABILITIES, SKILLS
 from ..world import battlemap as bm
 from ..world import hexmap
+from ..world import scenemap
 
 TOOLS: list[dict] = [
     {"name": "roll_check",
@@ -156,6 +157,63 @@ TOOLS: list[dict] = [
          "time_of_day": {"type": "string", "enum": ["dawn", "morning", "midday", "afternoon", "evening", "night"]},
          "weather": {"type": "string"}, "advance_hours": {"type": "integer", "minimum": 0, "maximum": 240}},
          "required": []}},
+    {"name": "draw_scene_map",
+     "description": "Draw the party's immediate surroundings outside combat so players can see where they stand: a "
+                    "street with a portal and guards rushing in, a tunnel fork, a shaft with rungs. Draw it whenever "
+                    "the party arrives somewhere that layout matters, and keep it true to your narration. Players "
+                    "only see what their characters can see (line of sight, within sight_ft), so draw what is really "
+                    "there, including what lies down the passages they haven't taken. One square is 5 ft. Cells: "
+                    "'#' wall/cliff/building, '.' floor or open ground, 'D' door or gate (blocks sight), 'T' "
+                    "obstacle (tree, statue, cart, rubble pile: name important ones with features), '~' difficult "
+                    "terrain (mud, shallow water, bone-slick), ' ' empty void (a drop, a pit, the sky).",
+     "input_schema": {"type": "object", "properties": {
+         "title": {"type": "string", "description": "Short name, e.g. 'The Throat: first fork'"},
+         "terrain": {"type": "string", "enum": ["road", "forest", "tavern", "cave", "dungeon", "ruins", "camp", "swamp", "town"],
+                     "description": "Colour palette for the map"},
+         "rows": {"type": "array", "items": {"type": "string"}, "minItems": 3, "maxItems": 24,
+                  "description": "The map, one string per row, all the same length (max 32 wide). Row 0 is the top."},
+         "party_at": {"type": "object", "properties": {"x": {"type": "integer"}, "y": {"type": "integer"}}, "required": ["x", "y"], "description": "Where the party stands (they're gathered around this square)"},
+         "features": {"type": "array", "maxItems": 20, "items": {"type": "object", "properties": {
+             "label": {"type": "string"}, "x": {"type": "integer"}, "y": {"type": "integer"}},
+             "required": ["label", "x", "y"]}, "description": "Labelled spots: 'Portal', 'Left passage (Gullet)', 'Rung 43'"},
+         "npcs": {"type": "array", "maxItems": 16, "items": {"type": "object", "properties": {
+             "name": {"type": "string"}, "x": {"type": "integer"}, "y": {"type": "integer"},
+             "hostile": {"type": "boolean"}}, "required": ["name", "x", "y"]}},
+         "sight_ft": {"type": "integer", "minimum": 10, "maximum": 200,
+                      "description": "How far the party can see (their light or darkvision). Omit in daylight."}},
+         "required": ["terrain", "rows", "party_at"]}},
+    {"name": "update_scene_map",
+     "description": "Change the scene map as the story moves: the party walks somewhere, one character splits off, "
+                    "NPCs move, a door opens or a gap closes, a new feature is found. Call it whenever positions change "
+                    "in your narration so the map (and your own sense of where everyone is) stays right.",
+     "input_schema": {"type": "object", "properties": {
+         "party_at": {"type": "object", "properties": {"x": {"type": "integer"}, "y": {"type": "integer"}}, "required": ["x", "y"], "description": "The whole party moves here together"},
+         "characters": {"type": "array", "items": {"type": "object", "properties": {
+             "name": {"type": "string"}, "x": {"type": "integer"}, "y": {"type": "integer"}},
+             "required": ["name", "x", "y"]}, "description": "Place individual player characters"},
+         "npcs": {"type": "array", "items": {"type": "object", "properties": {
+             "name": {"type": "string"}, "x": {"type": "integer"}, "y": {"type": "integer"},
+             "hostile": {"type": "boolean"}}, "required": ["name", "x", "y"]},
+                  "description": "Replaces the full NPC list (send [] to clear)"},
+         "add_features": {"type": "array", "items": {"type": "object", "properties": {
+             "label": {"type": "string"}, "x": {"type": "integer"}, "y": {"type": "integer"}},
+             "required": ["label", "x", "y"]}},
+         "remove_features": {"type": "array", "items": {"type": "string"}, "description": "Labels to remove"},
+         "set_cells": {"type": "array", "items": {"type": "object", "properties": {
+             "x": {"type": "integer"}, "y": {"type": "integer"}, "cell": {"type": "string"}},
+             "required": ["x", "y", "cell"]}, "description": "Change single squares, e.g. a door opening ('D' to '.')"}},
+         "required": []}},
+    {"name": "clear_scene_map",
+     "description": "Remove the scene map when the party leaves the area and the layout no longer matters.",
+     "input_schema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "spotlight",
+     "description": "Call when your narration ends on a question or decision for specific characters only (e.g. "
+                    "\"Kira, now or never\"). The next round then waits just for their players; everyone else may "
+                    "still act but isn't required to. Don't call it when the whole party should answer.",
+     "input_schema": {"type": "object", "properties": {
+         "characters": {"type": "array", "items": {"type": "string"}, "minItems": 1,
+                        "description": "Names of the player characters the decision is for"}},
+         "required": ["characters"]}},
     {"name": "rest",
      "description": "The party takes a short (1 hour) or long (8 hours) rest: hit points, spell slots and features recover.",
      "input_schema": {"type": "object", "properties": {"kind": {"type": "string", "enum": ["short", "long"]}},
@@ -192,6 +250,7 @@ class ToolBox:
         self.ended_combat = False
         self.opened_shop = False
         self.pending_rolls: list[dict] = []
+        self.spotlight: list[str] = []  # character ids the next exploration round waits on (empty = everyone)
         self.calls: list[str] = []
         self.ended_turn = False
         self.combat_steps = 0
@@ -550,6 +609,7 @@ class ToolBox:
         w = self.ctx.world
         if not w:
             raise RulesError("there is no world map yet")
+        self.ctx.state.pop("scene_map", None)  # leaving the area: the local map no longer applies
         if not destination:
             if not direction:
                 raise RulesError("give a destination by name, or a direction and how many days")
@@ -582,6 +642,46 @@ class ToolBox:
         if time_of_day:
             sc["time_of_day"] = time_of_day
         return "ok"
+
+    def _scene_done(self, sm: dict) -> str:
+        scenemap.refresh(sm, [cid for cid, _ in self.ctx.party()])
+        self.ctx.state["scene_map"] = sm
+        return "ok\n" + scenemap.describe(sm, self.ctx.party())
+
+    def t_draw_scene_map(self, terrain: str, rows: list, party_at: dict, title: str = "", features: list | None = None,
+                         npcs: list | None = None, sight_ft: int | None = None) -> str:
+        try:
+            sm = scenemap.draw(terrain, rows, party_at, features, npcs, sight_ft, title)
+        except ValueError as e:
+            raise RulesError(str(e))
+        return self._scene_done(sm)
+
+    def t_update_scene_map(self, party_at: dict | None = None, characters: list | None = None, npcs: list | None = None,
+                           add_features: list | None = None, remove_features: list | None = None,
+                           set_cells: list | None = None) -> str:
+        sm = self.ctx.state.get("scene_map")
+        if not sm:
+            raise RulesError("there is no scene map; draw one with draw_scene_map")
+        positions = {}
+        for c in characters or []:
+            positions[self._char(str(c.get("name", "")))[0]] = c
+        try:
+            scenemap.update(sm, party_at, npcs, add_features, remove_features, set_cells, positions)
+        except ValueError as e:
+            raise RulesError(str(e))
+        return self._scene_done(sm)
+
+    def t_clear_scene_map(self) -> str:
+        self.ctx.state.pop("scene_map", None)
+        return "ok"
+
+    def t_spotlight(self, characters: list[str]) -> str:
+        if isinstance(characters, str):
+            characters = [characters]
+        ids = [self._char(n)[0] for n in characters[:6]]
+        self.spotlight = list(dict.fromkeys(self.spotlight + ids))
+        names = ", ".join(self.ctx.chars[c]["name"] for c in self.spotlight)
+        return f"ok: the next round waits only for {names}; others may still act"
 
     def t_rest(self, kind: str) -> str:
         return rest_party(self.ctx, kind)

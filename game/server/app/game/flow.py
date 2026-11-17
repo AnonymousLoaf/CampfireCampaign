@@ -612,6 +612,8 @@ async def run_dm(game_id: str) -> None:
                 ctx.open_phase("shop", p_text)
             else:
                 ctx.open_phase("exploration", p_text)
+                if toolbox.spotlight:
+                    ctx.phase["spotlight"] = toolbox.spotlight
             ctx.game.dm_busy = False
             call.duration_ms = result.duration_ms
             call.input_tokens = result.input_tokens
