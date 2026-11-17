@@ -278,6 +278,9 @@ def _resolve_rolls(ctx: Ctx) -> None:
             combat_rolls = True
             lines.append(f"- {r['label']}{late}, resolved by the game: " + " ".join(res.get("lines") or []))
             continue
+        if r.get("dice"):
+            lines.append(f"- {res.get('text') or r['label']}{late} (already applied by the game)")
+            continue
         verdict = "" if res.get("success") is None else (" — SUCCESS" if res["success"] else " — FAILURE")
         lines.append(f"- {r['label']}: {res['total']} (d20 {res.get('natural')}{res['modifier']:+d}) vs DC {r['dc']}{verdict}{late}")
     enc = ctx.encounter

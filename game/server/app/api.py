@@ -379,7 +379,8 @@ async def upload_portrait(cid: str, image: UploadFile = File(...), u: User = Dep
     w, h = img.size
     side = min(w, h)
     img = img.crop(((w - side) // 2, (h - side) // 4, (w - side) // 2 + side, (h - side) // 4 + side))
-    img = img.resize((256, 256), Image.LANCZOS)
+    out = min(640, side)  # big enough to view full size; small uploads aren't blown up
+    img = img.resize((out, out), Image.LANCZOS)
     PORTRAIT_DIR.mkdir(parents=True, exist_ok=True)
     name = secrets.token_urlsafe(16) + ".webp"
     img.save(PORTRAIT_DIR / name, "WEBP", quality=85)

@@ -68,6 +68,8 @@ How the game works:
   can see, so it shows them their surroundings without spoiling what's down the other path.
 - Continuity: numbers, distances and positions you've stated are facts. Before narrating, check them against the
   recent story and the scene map (e.g. don't say "twenty rungs down" and "the forty-third rung" for the same moment).
+- Spells outside a fight go through cast_spell (it spends the slot and rolls the dice); never just pick a healing
+  number with heal.
 - Keep the party's NPC list, quest journal and the story summary (update_summary) current.
 
 What makes a great DM — hard constraints:

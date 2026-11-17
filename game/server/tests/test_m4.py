@@ -72,7 +72,7 @@ def test_m4_api():
         url = r.json()["portrait_url"]
         img = a.get(url)
         assert img.status_code == 200 and img.headers["content-type"] == "image/webp"
-        assert Image.open(io.BytesIO(img.content)).size == (256, 256)
+        assert Image.open(io.BytesIO(img.content)).size == (300, 300)  # square-cropped, never upscaled, max 640
         assert a.post(f"/api/characters/{cid}/portrait", files={"image": ("x.txt", b"nope", "text/plain")}).status_code == 400
         assert a.delete(f"/api/characters/{cid}/portrait").json()["portrait_url"] is None
         assert a.get(url).status_code == 404
