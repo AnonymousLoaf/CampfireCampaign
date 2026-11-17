@@ -77,7 +77,7 @@ export default function PartyPanel({
         return (
           <div key={c.id} className={`party-card ${selectedId === c.id ? "selected" : ""} ${c.down ? "down" : ""} ${c.dead ? "dead" : ""}`} onClick={() => onSelect(c.id)}>
             <div className="party-card-top">
-              <Portrait c={c} size="small" />
+              <Portrait c={c} size="small" zoomable />
               <div className="party-card-name">
                 <div>
                   <strong>{c.name}</strong> {isMe && <span className="muted small">(you)</span>}

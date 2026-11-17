@@ -562,6 +562,9 @@ export interface PendingRoll {
   };
   /** Typed combat: an attack or spell the DM queued for this character; the roll resolves it. */
   combat?: Record<string, unknown> | null;
+  /** A spell cast outside combat: its healing or damage dice, e.g. "2d8" (bonus is added). */
+  dice?: string;
+  what?: string;
 }
 
 export interface Phase {

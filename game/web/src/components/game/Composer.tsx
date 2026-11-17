@@ -249,6 +249,14 @@ function RollNeed({ r, saveDc }: { r: PendingRoll; saveDc?: number }) {
       </div>
     );
   }
+  if (r.dice) {
+    return (
+      <div className="roll-need small">
+        Roll {r.dice}
+        {add} for the spell&apos;s {r.what ?? "effect"}.{r.what === "healing" ? " The game adds it to their hit points." : ""}
+      </div>
+    );
+  }
   if (r.check === "combat" && bonus) {
     return (
       <div className="roll-need small">

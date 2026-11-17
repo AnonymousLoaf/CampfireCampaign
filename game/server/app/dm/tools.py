@@ -93,8 +93,21 @@ TOOLS: list[dict] = [
      "input_schema": {"type": "object", "properties": {
          "target": {"type": "string"}, "amount": {"type": "integer", "minimum": 0, "maximum": 200},
          "damage_type": {"type": "string"}}, "required": ["target", "amount"]}},
+    {"name": "cast_spell",
+     "description": "Outside combat, a player character casts one of their spells: the game checks they have it "
+                    "ready, spends the spell slot, and rolls its dice. Healing spells (Cure Wounds, Healing Word…) heal "
+                    "a player character target automatically; for an NPC target you get the amount and describe it. "
+                    "If players roll their own dice, the caster rolls and you get the result next turn. ALWAYS use this "
+                    "when a player casts a leveled spell or a healing spell outside a fight; never use heal for spells.",
+     "input_schema": {"type": "object", "properties": {
+         "caster": {"type": "string", "description": "The player character casting"},
+         "spell": {"type": "string", "description": "Spell name, e.g. 'Cure Wounds'"},
+         "target": {"type": "string", "description": "Who it's cast on (a character or NPC name), if anyone"},
+         "slot_level": {"type": "integer", "minimum": 1, "maximum": 9, "description": "Upcast with a higher slot"}},
+         "required": ["caster", "spell"]}},
     {"name": "heal",
-     "description": "Restore hit points to a player character.",
+     "description": "Restore hit points to a player character from something that isn't a spell (a potion, a "
+                    "healer's kit, a blessing). For spells use cast_spell.",
      "input_schema": {"type": "object", "properties": {
          "target": {"type": "string"}, "amount": {"type": "integer", "minimum": 1, "maximum": 200}},
          "required": ["target", "amount"]}},
@@ -501,6 +514,54 @@ class ToolBox:
         self.ctx.log_lines(extra)
         return f"{obj['name']} takes {dealt}. {note}".strip()
 
+    def t_cast_spell(self, caster: str, spell: str, target: str | None = None, slot_level: int | None = None) -> str:
+        if self.ctx.encounter and not self.ctx.encounter.get("outcome"):
+            raise RulesError("a fight is on: use combat_cast on the caster's turn")
+        cid, s = self._char(caster)
+        key = spell.strip().lower().replace("'", "").replace(" ", "-")
+        have = list(dict.fromkeys(ch.all_cantrips(s) + ch.ready_spells(s)))
+        book = srd.spells(ch.rs(s))
+        idx = next((i for i in have if i == key or (book.get(i) or {}).get("name", "").lower() == spell.strip().lower()), None)
+        if not idx:
+            names = ", ".join((book.get(i) or {}).get("name", i) for i in have) or "none"
+            raise RulesError(f"{s['name']} doesn't have {spell!r} ready (ready: {names})")
+        rec = book.get(idx) or {}
+        lvl = int(rec.get("level", 0))
+        used = 0
+        if lvl > 0:
+            used = ch.use_slot(s, max(lvl, int(slot_level or lvl)))
+        name = rec.get("name", spell)
+        slot_txt = f" (level-{used} slot)" if used else ""
+        tgt_cid = self.ctx.find_char_by_name(target) if target else None
+        tgt_name = self.ctx.chars[tgt_cid]["name"] if tgt_cid else (target or "").strip()[:60]
+        eff = combat.FX(s).get(idx) or {}
+        on = f" on {tgt_name}" if tgt_name else ""
+        if eff.get("kind") not in ("heal",) and not eff.get("dice"):
+            self.ctx.log("event", f"{s['name']} casts {name}{on}{slot_txt}.")
+            return f"{s['name']} cast {name}{on}{slot_txt}. Describe the effect from the spell's rules."
+        up = max(0, used - lvl) if used else 0
+        expr = combat._upcast(eff["dice"], eff.get("upcast"), up)
+        if eff.get("cantrip"):
+            expr = combat._cantrip_dice(expr, s["level"])
+        ability = ch.spell_ability(s)
+        bonus = ch.mod(s["abilities"][ability]) if (ability and eff.get("kind") == "heal") else 0
+        if eff.get("kind") == "heal" and s["class"] == "cleric" and str(s.get("subclass") or "") == "life" and used:
+            bonus += 2 + used
+        what = "healing" if eff.get("kind") == "heal" else f"{eff.get('type', '')} damage".strip()
+        roll = {"id": uuid.uuid4().hex[:8], "character_id": cid, "check": "spell", "dice": expr, "bonus": bonus,
+                "dc": None, "advantage": "normal", "result": None, "spell": name, "what": what,
+                "heal_target": tgt_cid if eff.get("kind") == "heal" else None, "target_name": tgt_name,
+                "label": f"{s['name']}: {name}{on}, {expr}{bonus:+d} {what}" if bonus else f"{s['name']}: {name}{on}, {expr} {what}"}
+        self.ctx.log("event", f"{s['name']} casts {name}{on}{slot_txt}.")
+        m = self.ctx.member_for_char(cid)
+        if self.ctx.settings.get("rolls") == "auto" or not m:
+            roll_pending(self.ctx, roll)
+            return f"{roll['result']['text']} Narrate it."
+        roll["user_id"] = m.user_id
+        self.pending_rolls.append(roll)
+        return (f"Roll requested: {s['name']} rolls {expr}{f'{bonus:+d}' if bonus else ''} for the {what} from {name}. End your "
+                f"narration by asking for it; the game applies it and you get the result next turn.")
+
     def t_heal(self, target: str, amount: int) -> str:
         cid, s = self._char(target)
         n = ch.heal(s, amount)
@@ -760,6 +821,8 @@ def _check_bonus(s: dict, check: str) -> tuple[str, int]:
 def roll_pending(ctx: Ctx, roll: dict) -> dict:
     if roll.get("combat"):
         return _roll_combat(ctx, roll)
+    if roll.get("dice"):
+        return _roll_spell_dice(ctx, roll)
     s = ctx.chars.get(roll["character_id"])
     bonus = roll.get("bonus", 0)
     r = dice.d20(bonus, roll.get("advantage", "normal"))
@@ -769,6 +832,25 @@ def roll_pending(ctx: Ctx, roll: dict) -> dict:
         s["inspiration"] = True
     ctx.log("roll", f"{roll['label']}{two_dice(r)}: {r['total']}" + (f" vs DC {roll['dc']} — {'success' if ok else 'failure'}" if roll.get("dc") else "") + ".",
             None, {"roll": r, "dc": roll.get("dc"), "character_id": roll["character_id"]})
+    return roll
+
+
+def _roll_spell_dice(ctx: Ctx, roll: dict) -> dict:
+    """An out-of-combat spell's healing or damage dice; healing lands on a player character target at once."""
+    r = dice.roll(roll["dice"])
+    total = max(1, r.total + roll.get("bonus", 0)) if roll.get("heal_target") or roll.get("what") == "healing" else r.total + roll.get("bonus", 0)
+    tid = roll.get("heal_target")
+    if tid and tid in ctx.chars:
+        healed = ch.heal(ctx.chars[tid], total)
+        text = (f"{roll['spell']}: {total} healing ({' + '.join(map(str, r.rolls))}{roll.get('bonus', 0):+d}). "
+                f"{ctx.chars[tid]['name']} regains {healed} HP ({ctx.chars[tid]['hp']}/{ctx.chars[tid]['hp_max']}).")
+    else:
+        who = f" for {roll['target_name']}" if roll.get("target_name") else ""
+        text = f"{roll['spell']}: {total} {roll.get('what', '')}{who} ({' + '.join(map(str, r.rolls))}" \
+               f"{roll.get('bonus', 0):+d})."
+    roll["result"] = {"total": total, "rolls": r.rolls, "modifier": roll.get("bonus", 0), "natural": None,
+                      "success": None, "lines": [text], "text": text}
+    ctx.log("roll", text, None, {"roll": r.as_dict(), "character_id": roll["character_id"]})
     return roll
 
 

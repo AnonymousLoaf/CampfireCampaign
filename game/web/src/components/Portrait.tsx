@@ -1,4 +1,5 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { CharacterView } from "../api/types";
 import { initials } from "../util/format";
 
@@ -72,17 +73,63 @@ export default function Portrait({
   c,
   size = "",
   className = "",
+  zoomable = false,
 }: {
   c: Pick<CharacterView, "name" | "class" | "color"> & { portrait_url?: string | null };
   size?: Size;
   className?: string;
+  /** Click to see the portrait full size (only when there is an uploaded image). */
+  zoomable?: boolean;
 }) {
   const [broken, setBroken] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
   const url = c.portrait_url && broken !== c.portrait_url ? c.portrait_url : null;
+  const canZoom = zoomable && !!url;
   return (
-    <span className={`char-avatar portrait ${size} ${className}`} style={{ background: c.color || "#777" }} title={c.name}>
-      {url ? <img src={url} alt="" loading="lazy" onError={() => setBroken(url)} /> : <Crest name={c.name} cls={c.class} color={c.color} size={PX[size]} />}
-    </span>
+    <>
+      <span
+        className={`char-avatar portrait ${size} ${className} ${canZoom ? "zoomable" : ""}`}
+        style={{ background: c.color || "#777" }}
+        title={canZoom ? `${c.name}: click to enlarge` : c.name}
+        onClick={
+          canZoom
+            ? (e) => {
+                e.stopPropagation();
+                setOpen(true);
+              }
+            : undefined
+        }
+      >
+        {url ? <img src={url} alt="" loading="lazy" onError={() => setBroken(url)} /> : <Crest name={c.name} cls={c.class} color={c.color} size={PX[size]} />}
+      </span>
+      {open && url && <PortraitLightbox url={url} name={c.name} onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
+/** A portrait shown large over the page; click anywhere or press Escape to close. */
+function PortraitLightbox({ url, name, onClose }: { url: string; name: string; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return createPortal(
+    <div
+      className="portrait-lightbox"
+      role="dialog"
+      aria-label={`${name} portrait`}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClose();
+      }}
+    >
+      <figure>
+        <img src={url} alt={`${name} portrait`} />
+        <figcaption>{name}</figcaption>
+      </figure>
+    </div>,
+    document.body,
   );
 }
 
@@ -123,7 +170,7 @@ export function PortraitEditor({
 
   return (
     <div className="portrait-editor">
-      <Portrait c={c} size={size} />
+      <Portrait c={c} size={size} zoomable />
       <div className="portrait-actions">
         <input ref={input} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={(e) => void pick(e.target.files?.[0])} />
         <button className="btn tiny" disabled={busy} onClick={() => input.current?.click()}>
