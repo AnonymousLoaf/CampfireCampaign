@@ -83,11 +83,14 @@ export default function SheetTabs({ viewedId, onViewed }: { viewedId: string | n
           <div className="stack-tight">
             {view.npcs.length === 0 && <div className="muted small">You haven't met anyone notable yet.</div>}
             {view.npcs.map((n, i) => (
-              <div key={i} className="npc">
-                <div>
-                  <strong>{n.name}</strong> <span className="muted small">{n.role}</span> {n.attitude && <span className="badge">{n.attitude}</span>}
+              <div key={i} className={`npc ${n.portrait_url ? "with-face" : ""}`}>
+                {n.portrait_url && <Portrait c={{ name: n.name, class: "", color: "#5a7d9a", portrait_url: n.portrait_url }} size="big" zoomable />}
+                <div className="npc-text">
+                  <div>
+                    <strong>{n.name}</strong> <span className="muted small">{n.role}</span> {n.attitude && <span className="badge">{n.attitude}</span>}
+                  </div>
+                  {n.notes && <div className="small">{n.notes}</div>}
                 </div>
-                {n.notes && <div className="small">{n.notes}</div>}
               </div>
             ))}
           </div>

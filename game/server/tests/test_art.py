@@ -117,3 +117,32 @@ def test_paid_pictures_are_counted_outside_the_game_state(monkeypatch):
             assert db.get(Game, gid).art_count == 1
         finally:
             db.close()
+
+
+def test_npcs_get_portraits_in_the_journal_and_on_the_map(monkeypatch):
+    calls = _fake(monkeypatch)
+    with TestClient(app):
+        host = _client("artnpc")
+        host.put("/api/me/xai-key", json={"key": FAKE_KEY})
+        gid = host.post("/api/games", json={"name": "A", "character_id": _character(host, "Ash"),
+                                            "settings": {"ruleset": "2024"}}).json()["id"]
+        db = SessionLocal()
+        try:
+            ctx = load(db, gid)
+            tb = ToolBox(ctx)
+            tb.call("upsert_npc", {"name": "Captain Ilsa Vane", "role": "blue-coat captain", "notes": "Owes Teft two favours."})
+            tb.call("draw_scene_map", {"terrain": "cave", "rows": ["#####", "#...#", "#####"], "party_at": {"x": 1, "y": 1},
+                                       "npcs": [{"name": "Vane", "x": 3, "y": 1}]})
+            ctx.save()
+            db.commit()
+        finally:
+            db.close()
+        asyncio.run(art.refresh_game_art(gid))
+        npc_calls = [p for p, a in calls if "Captain Ilsa Vane" in p]
+        assert len(npc_calls) == 1 and "blue-coat captain" in npc_calls[0]
+        v = host.get(f"/api/games/{gid}/view").json()
+        url = v["npcs"][0]["portrait_url"]
+        assert url and url.startswith("/api/files/art/") and "art" not in v["npcs"][0]
+        assert [t["portrait_url"] for t in v["scene_map"]["tokens"] if t["name"] == "Vane"] == [url]
+        asyncio.run(art.refresh_game_art(gid))  # once only
+        assert len([p for p, a in calls if "Captain Ilsa Vane" in p]) == 1

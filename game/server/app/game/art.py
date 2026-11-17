@@ -127,6 +127,32 @@ def monster_prompt(t: dict) -> str:
             "fantasy, head and shoulders, facing the viewer, menacing, dark background. " + STYLE)
 
 
+def npc_prompt(n: dict, tone: str = "heroic") -> str:
+    role = (n.get("role") or "").strip()
+    notes = (n.get("notes") or "").strip()[:300]
+    return (f"Character portrait of {n['name']}" + (f", {role}" if role else "") + ", a person in a "
+            f"Dungeons-and-Dragons-style fantasy world, head and shoulders, facing the viewer. "
+            + (f"What we know of them: {notes}. " if notes else "") + f"Mood: {tone}. " + STYLE)
+
+
+def npc_art_by_name(npcs: list) -> dict[str, str]:
+    """lower-case NPC name -> portrait URL, for the NPCs that have one."""
+    return {n["name"].strip().lower(): art_url(n["art"]) for n in npcs or [] if n.get("art") and n.get("name")}
+
+
+def portrait_for(name: str, by_name: dict[str, str]) -> str | None:
+    """Match a map token's name to a journal NPC: exact, else one name inside the other ("Vane" / "Captain Ilsa Vane")."""
+    k = (name or "").strip().lower()
+    if not k:
+        return None
+    if k in by_name:
+        return by_name[k]
+    for n, url in by_name.items():
+        if len(k) >= 3 and (k in n or n in k):
+            return url
+    return None
+
+
 def character_prompt(sheet: dict, race: str, cls: str, notes: str = "") -> str:
     looks = notes.strip() or (sheet.get("appearance") or "").strip()
     back = (sheet.get("backstory") or "").strip()[:300]
@@ -189,6 +215,10 @@ async def refresh_game_art(game_id: str) -> None:
                 p = monster_prompt(t)
                 if not any(j[2] == p for j in jobs):
                     jobs.append(("monster", t["monster_index"], p, "1:1"))
+        for n in ctx.state.get("npcs") or []:  # everyone the party has met gets a face, once
+            if n.get("name") and not n.get("art"):
+                p = npc_prompt(n, ctx.settings.get("tone", "heroic"))
+                jobs.append(("npc", n["name"], p, "1:1"))
     finally:
         db.close()
 
@@ -216,6 +246,10 @@ async def refresh_game_art(game_id: str) -> None:
             for what, ident, name in results:
                 if what == "scene":
                     ctx.state["scene_art"] = {"sig": ident, "name": name}
+                elif what == "npc":
+                    for n in ctx.state.get("npcs") or []:
+                        if n.get("name") == ident:
+                            n["art"] = name
                 else:
                     for t in ((ctx.encounter or {}).get("tokens") or {}).values():
                         if t.get("monster_index") == ident:

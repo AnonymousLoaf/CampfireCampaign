@@ -998,3 +998,13 @@
   padding: 6px 8px;
   resize: vertical;
 }
+
+.npc.with-face {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.npc.with-face .npc-text {
+  flex: 1;
+  min-width: 0;
+}

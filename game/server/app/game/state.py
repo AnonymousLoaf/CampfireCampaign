@@ -15,7 +15,7 @@ from ..rules import shop as shop_rules
 from ..rules.character import RulesError
 from ..world import hexmap
 from ..world import scenemap
-from .art import art_url
+from .art import art_url, npc_art_by_name, portrait_for
 from . import combat
 
 DEFAULT_SETTINGS = {
@@ -353,6 +353,7 @@ def build_view(db: Session, ctx: Ctx, uid: str | None, tv: bool = False) -> dict
     logs = list(db.scalars(select(LogEntry).where(LogEntry.game_id == game.id).order_by(LogEntry.id.desc()).limit(150)))
     logs.reverse()
     tv_token = ctx.state.get("tv_token")
+    npc_faces = npc_art_by_name(ctx.state.get("npcs") or [])
     return {
         "game": {"id": game.id, "name": game.name, "status": game.status, "invite_code": game.invite_code,
                  "host_id": game.host_id, "settings": _public_settings(ctx.settings, is_host),
@@ -372,17 +373,28 @@ def build_view(db: Session, ctx: Ctx, uid: str | None, tv: bool = False) -> dict
         "world": world,
         "location": ctx.state.get("location") or {"name": "", "settlement_id": None, "description": ""},
         "scene": ctx.state.get("scene") or {"type": "town", "time_of_day": "morning", "weather": "clear", "day": 1, "hour": 8},
-        "encounter": combat.view(enc, ctx.chars, controls) if enc else None,
+        "encounter": _with_npc_faces(combat.view(enc, ctx.chars, controls) if enc else None, npc_faces),
         "scene_art": art_url((ctx.state.get("scene_art") or {}).get("name")),
-        "scene_map": scenemap.view(ctx.state["scene_map"], ctx.party(), my_member.character_id if my_member else None)
-                     if ctx.state.get("scene_map") else None,
+        "scene_map": _with_npc_faces(scenemap.view(ctx.state["scene_map"], ctx.party(),
+                                                   my_member.character_id if my_member else None)
+                                     if ctx.state.get("scene_map") else None, npc_faces),
         "shop": shop_rules.stock_view(shop) if shop else None,
-        "npcs": ctx.state.get("npcs", []),
+        "npcs": [{**{k: v for k, v in n.items() if k != "art"},
+                  "portrait_url": art_url(n.get("art"))} for n in ctx.state.get("npcs", [])],
         "quests": ctx.state.get("quests", []),
         "log": [{"id": l.id, "ts": iso(l.ts), "kind": l.kind, "author": l.author, "text": l.text, "data": l.data}
                 for l in logs],
         "dm": {"engine": ctx.settings.get("dm_engine"), "model": ctx.settings.get("dm_model"), "busy": bool(game.dm_busy)},
     }
+
+
+def _with_npc_faces(m: dict | None, faces: dict[str, str]) -> dict | None:
+    """Give NPC tokens on a map (bystanders, people on the scene map) their journal portrait."""
+    if m and faces:
+        for t in m.get("tokens", []):
+            if t.get("kind") in ("npc", "monster") and not t.get("portrait_url") and not t.get("character_id"):
+                t["portrait_url"] = portrait_for(t.get("name", ""), faces)
+    return m
 
 
 def _public_settings(s: dict, is_host: bool) -> dict:
