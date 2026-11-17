@@ -112,3 +112,18 @@ def test_settings_voice_test_endpoint(monkeypatch):
         assert r.status_code == 200 and r.headers["content-type"] == "audio/mpeg" and len(r.content) > 100
         assert abs(fake.calls[-1][2] - 0.9 / 2 ** 0.5) < 1e-6  # half an octave up: synthesised slower, then raised
         assert c.post("/api/voices/test", json={"text": "x", "voice": "not_a_voice"}).status_code == 400
+
+
+
+def test_voice_test_reads_quotes_in_the_voice_and_the_rest_as_narrator(monkeypatch):
+    fake = FakeKokoro()
+    monkeypatch.setattr(voices, "_get_engine", lambda: fake)
+    monkeypatch.setattr(voices, "available", lambda: True)
+    with TestClient(app):
+        c = _client("voicesplit")
+        r = c.post("/api/voices/test", json={"text": '"Patrons do not descend," the steward says. "Mind the rung."',
+                                             "voice": "af_bella", "speed": 1.0, "pitch": 0})
+        assert r.status_code == 200
+        spoken = [(t, round(style, 1)) for t, style, _ in fake.calls]
+        assert [t for t, _ in spoken] == ["Patrons do not descend,", "the steward says.", "Mind the rung."]
+        assert spoken[0][1] == spoken[2][1] != spoken[1][1]  # quotes in Bella, the middle in the narrator

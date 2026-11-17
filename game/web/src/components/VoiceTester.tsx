@@ -92,7 +92,8 @@ export default function VoiceTester() {
         <>
           <p className="muted small">
             The voices the host PC reads narration with. Every NPC gets their own recipe like this (a voice, maybe a
-            second one blended in, a speed and a pitch) and keeps it for the whole campaign.
+            second one blended in, a speed and a pitch) and keeps it for the whole campaign. As in a game, words in
+            &quot;quotes&quot; are spoken in the voice below and the rest by the narrator.
           </p>
           <textarea rows={3} maxLength={300} value={text} onChange={(e) => setText(e.target.value)} />
           <div className="row gap wrap">

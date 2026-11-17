@@ -517,7 +517,12 @@ async def test_voice(body: VoiceTestBody, u: User = Depends(current_user)):
         raise HTTPException(400, "unknown voice")
     if body.voice == "narrator":
         recipe = {**recipe, "speed": body.speed, "pitch": body.pitch}
-    mp3 = await asyncio.to_thread(voices.render, [(body.text.strip(), recipe)])
+    # as in a game: words in quotes are the character speaking, everything else is the narrator
+    segs = voices.segments(body.text.strip(), [])
+    parts = [(t, voices.NARRATOR if who is None else recipe) for t, who in segs] or [(body.text.strip(), recipe)]
+    if not any(who is not None for _, who in segs):
+        parts = [(body.text.strip(), recipe)]  # no quotes at all: read the whole line in the chosen voice
+    mp3 = await asyncio.to_thread(voices.render, parts)
     return Response(mp3, media_type="audio/mpeg", headers={"Cache-Control": "no-store"})
 
 
