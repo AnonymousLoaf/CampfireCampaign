@@ -95,13 +95,14 @@ export default function SettingsScreen({ me, onMeChange, onLogout }: { me: Me; o
           <div className="brand-inline">Settings</div>
         </div>
         <div className="topbar-right">
-          <span className="muted">Signed in as {me.display_name}</span>
+          <span className="muted signed-in">Signed in as {me.display_name}</span>
           <button className="btn ghost small" onClick={onLogout}>
             Sign out
           </button>
         </div>
       </header>
       <main className="lobby-grid settings-grid">
+        <div className="muted small settings-who">Signed in as {me.display_name}</div>
         <DiceTray me={me} />
         <SettingsPanel me={me} onMeChange={onMeChange} />
       </main>

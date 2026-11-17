@@ -25,7 +25,7 @@ async def lifespan(app: FastAPI):
     task.cancel()
 
 
-app = FastAPI(title="Async D&D", lifespan=lifespan)
+app = FastAPI(title="Campfire Campaign", lifespan=lifespan)
 app.include_router(router)
 
 if WEB_DIST.exists():

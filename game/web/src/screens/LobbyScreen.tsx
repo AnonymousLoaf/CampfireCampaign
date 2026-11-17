@@ -95,12 +95,12 @@ export default function LobbyScreen({
     <div className="lobby">
       <header className="topbar">
         <div className="brand-inline">
-          <span className="brand-sigil">⚔</span> Async D&amp;D
+          <span className="brand-sigil">⚔</span> Campfire Campaign
         </div>
         <div className="topbar-right">
-          <span className="muted">Signed in as {me.display_name}</span>
-          <button className="btn ghost small" onClick={() => navigate({ name: "settings" })} title="Settings, sound and test dice">
-            ⚙ Settings
+          <span className="muted signed-in">Signed in as {me.display_name}</span>
+          <button className="btn ghost small" onClick={() => navigate({ name: "settings" })} title="Settings, sound and test dice" aria-label="Settings">
+            ⚙<span className="topbar-label"> Settings</span>
           </button>
           <button className="btn ghost small" onClick={onLogout}>
             Sign out

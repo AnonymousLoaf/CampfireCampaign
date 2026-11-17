@@ -263,7 +263,7 @@ def push_unsubscribe(body: UnsubscribeBody, u: User = Depends(current_user), db:
 
 @router.post("/push/test")
 async def push_test(u: User = Depends(current_user)):
-    await notify.notify_users([u.id], "Async D&D", "Notifications are working on this device.", "/")
+    await notify.notify_users([u.id], "Campfire Campaign", "Notifications are working on this device.", "/")
     return {"ok": True}
 
 
