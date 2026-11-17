@@ -515,7 +515,7 @@ def resolve_attack(enc: dict, chars: dict, att: dict, tgt: dict, *, name: str, t
     head = f"{att['name']} attacks {tgt['name']} with {name}: {r['total']}{adv_txt}{vs}"
     data = {"attacker": att["id"], "target": tgt["id"], "roll": r, "ac": ac if tgt["kind"] == "pc" else None,
             "hit": hit, "crit": crit,
-            "attack": name, "damage_type": dtype, "ranged": ranged, "spell": spell}
+            "attack": name, "damage_type": dtype, "ranged": ranged, "spell": spell, "damage_notation": dmg}
     if not hit:
         out = [line(head + " — miss.", "combat", **data)]
         if mastery == "Graze" and ability_mod > 0 and weapon:

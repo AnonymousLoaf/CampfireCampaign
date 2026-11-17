@@ -1087,3 +1087,21 @@
 .voice-tester input[type="range"] {
   width: 100%;
 }
+
+/* map piece cards: portrait and what the party knows */
+.token-card {
+  max-width: min(300px, calc(100% - 16px));
+  max-height: calc(100% - 16px);
+  overflow-y: auto;
+}
+.token-card .token-card-art {
+  max-width: 220px;
+  cursor: zoom-in;
+}
+.token-card-sub {
+  color: var(--gold-2);
+}
+.token-card-line {
+  color: var(--text);
+  line-height: 1.35;
+}

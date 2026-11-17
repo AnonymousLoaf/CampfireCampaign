@@ -272,6 +272,8 @@ def _resolve_rolls(ctx: Ctx) -> None:
     for r in p.get("pending_rolls", []):
         if r.get("result") is None:
             roll_pending(ctx, r)
+            if r.get("result") is None:  # an attack that hit: its damage is a second roll
+                roll_pending(ctx, r)
             r["auto"] = True
         res = r["result"]
         late = " (rolled automatically — the player missed the deadline)" if r.get("auto") else ""

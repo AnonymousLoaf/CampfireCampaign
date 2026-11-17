@@ -6,7 +6,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from .api import router
@@ -27,6 +27,19 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Campfire Campaign", lifespan=lifespan)
 app.include_router(router)
+
+
+@app.middleware("http")
+async def www_redirect(request: Request, call_next):
+    """www.campfirecampaign.com → campfirecampaign.com, keeping the path (and the #/game/… link, which the
+    browser carries over itself)."""
+    host = (request.headers.get("host") or "").lower()
+    if host.startswith("www."):
+        url = f"https://{host[4:]}{request.url.path}"
+        if request.url.query:
+            url += f"?{request.url.query}"
+        return RedirectResponse(url, status_code=301)
+    return await call_next(request)
 
 
 @app.middleware("http")

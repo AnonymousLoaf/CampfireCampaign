@@ -108,7 +108,7 @@ export default function Portrait({
 }
 
 /** A portrait shown large over the page; click anywhere or press Escape to close. */
-function PortraitLightbox({ url, name, onClose }: { url: string; name: string; onClose: () => void }) {
+export function PortraitLightbox({ url, name, onClose }: { url: string; name: string; onClose: () => void }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);

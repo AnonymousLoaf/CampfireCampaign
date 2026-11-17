@@ -1,6 +1,7 @@
 """DM tools — the AI DM's only way to change the game. Every call is validated here."""
 from __future__ import annotations
 
+import copy
 import random
 import uuid
 
@@ -1026,9 +1027,38 @@ def _roll_combat(ctx: Ctx, roll: dict) -> dict:
     earlier = [r for r in ctx.phase.get("pending_rolls", []) if r.get("combat") and r.get("result") is None]
     if earlier and earlier[0]["id"] != roll["id"]:
         raise RulesError("make the earlier roll first — this turn's steps happen in order")
-    mine, everything = turns.execute_through(enc, ctx.chars, roll["id"])
-    ctx.log_lines(everything)
+    tok = next((t for t in enc["tokens"].values() if t.get("character_id") == roll["character_id"]), None)
+    staged = roll.get("to_hit")
+    if staged is None and tok:
+        # First click: the d20. Try the turn on a copy to see whether the attack lands; on a hit the player
+        # throws the damage dice with a second click.
+        e2, c2 = copy.deepcopy(enc), copy.deepcopy(ctx.chars)
+        rec: list = []
+        with dice.scripted(record=rec):
+            trial, _ = turns.execute_through(e2, c2, roll["id"])
+        hit_ln = next((ln for ln in trial if (ln.get("data") or {}).get("attacker") == tok["id"]
+                       and (ln.get("data") or {}).get("hit") and (ln.get("data") or {}).get("damage_dice")), None)
+        if hit_ln:
+            hd = hit_ln["data"]
+            r = hd["roll"]
+            roll["to_hit"] = {"rolls": r.get("rolls", []), "natural": r.get("natural"), "total": r.get("total"),
+                              "modifier": r.get("modifier", 0), "crit": hd.get("crit", False),
+                              "attack": hd.get("attack"), "dice": hd.get("damage_notation"),
+                              "target": enc["tokens"].get(hd.get("target"), {}).get("name")}
+            roll["replay"] = rec
+            crit = " A critical hit: the damage dice are doubled." if hd.get("crit") else ""
+            ctx.log("combat", f"{tok['name']} attacks {roll['to_hit']['target'] or 'the target'} with "
+                              f"{hd.get('attack') or 'an attack'}: {r.get('total')} — {'critical hit' if hd.get('crit') else 'hit'}! "
+                              f"Roll damage.{crit}", None,
+                    {"attacker": tok["id"], "target": hd.get("target"), "roll": r, "hit": True, "crit": hd.get("crit", False),
+                     "attack": hd.get("attack"), "to_hit_only": True})
+            return roll
+    with dice.scripted(replay=roll.pop("replay", None) if staged else None):
+        mine, everything = turns.execute_through(enc, ctx.chars, roll["id"])
     first = next((ln for ln in mine if (ln.get("data") or {}).get("roll")), None)
+    if staged and first:
+        first["data"]["damage_only"] = True  # the d20 was already shown on the first click
+    ctx.log_lines(everything)
     d = (first or {}).get("data") or {}
     r = d.get("roll") or {}
     roll["result"] = {"total": r.get("total", 0), "natural": r.get("natural", 0), "rolls": r.get("rolls", []),

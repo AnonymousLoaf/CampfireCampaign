@@ -344,7 +344,8 @@ def build_view(db: Session, ctx: Ctx, uid: str | None, tv: bool = False) -> dict
         "submissions_visible": [{"user_id": k, "text": v.get("text"), "travel_to": v.get("travel_to"), "rest": v.get("rest"),
                                  "edited": bool(v.get("edited")), "updated_at": v.get("updated_at")}
                                 for k, v in subs.items()],
-        "pending_rolls": p.get("pending_rolls", []), "error": p.get("error"),
+        "pending_rolls": [{k: v for k, v in r.items() if k != "replay"} for r in p.get("pending_rolls", [])],
+        "error": p.get("error"),
         "spotlight": [ctx.chars[c]["name"] for c in p.get("spotlight") or [] if c in ctx.chars],
         "their_call": ctx.their_call(uid) if uid else [],
     }
