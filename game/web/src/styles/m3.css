@@ -621,3 +621,10 @@
     display: none;
   }
 }
+
+@media (max-width: 760px) {
+  /* no fight on: the greyed-out Battle map tab only takes room */
+  .game-screen.mobile .map-tabs button:disabled {
+    display: none;
+  }
+}
