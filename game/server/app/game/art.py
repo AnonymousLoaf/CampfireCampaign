@@ -153,6 +153,20 @@ def host_key(ctx) -> str | None:
         return None
 
 
+def _count_one(game_id: str) -> None:
+    """Add one paid picture to the game's tally, atomically (outside the game state)."""
+    from sqlalchemy import func, update
+
+    from ..db import SessionLocal
+    from ..models import Game
+    db = SessionLocal()
+    try:
+        db.execute(update(Game).where(Game.id == game_id).values(art_count=func.coalesce(Game.art_count, 0) + 1))
+        db.commit()
+    finally:
+        db.close()
+
+
 async def refresh_game_art(game_id: str) -> None:
     """After a DM turn: paint the current scene and any monster without a portrait (in the background)."""
     from ..db import SessionLocal
@@ -165,8 +179,7 @@ async def refresh_game_art(game_id: str) -> None:
         key = host_key(ctx)
         if not key:
             return
-        art = ctx.state.get("art") or {}
-        used = int(art.get("count", 0))
+        used = int(ctx.game.art_count or 0)
         jobs: list[tuple[str, str, str, str]] = []  # (what, id, prompt, aspect)
         sig, sp = scene_prompt(ctx)
         if (ctx.state.get("scene_art") or {}).get("sig") != sig:
@@ -189,7 +202,9 @@ async def refresh_game_art(game_id: str) -> None:
         except Exception as e:  # noqa: BLE001 — art is a nice-to-have; never break the game over it
             log.warning("art for %s failed: %s", game_id, e)
             continue
-        used += 1 if fresh else 0
+        if fresh:
+            used += 1
+            _count_one(game_id)
         results.append((what, ident, name))
     if not results:
         return
@@ -205,7 +220,6 @@ async def refresh_game_art(game_id: str) -> None:
                     for t in ((ctx.encounter or {}).get("tokens") or {}).values():
                         if t.get("monster_index") == ident:
                             t["art"] = name
-            ctx.state["art"] = {"count": used}
             ctx.save()
         finally:
             db.close()

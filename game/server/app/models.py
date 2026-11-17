@@ -106,6 +106,8 @@ class Game(Base):
     state: Mapped[dict] = mapped_column(JSON, default=dict)
     summary: Mapped[str] = mapped_column(Text, default="")
     dm_busy: Mapped[bool] = mapped_column(Boolean, default=False)
+    # new AI pictures paid for in this game (its own column: a DM turn saving the state can't overwrite it)
+    art_count: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 

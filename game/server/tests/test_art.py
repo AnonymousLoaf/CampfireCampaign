@@ -88,3 +88,32 @@ def test_generate_a_character_portrait(monkeypatch):
         assert r.status_code == 200, r.text
         assert r.json()["portrait_url"] and "bronze scales" in calls[-1][0] and "Teft" in calls[-1][0]
         assert c.get(r.json()["portrait_url"]).status_code == 200
+
+
+def test_paid_pictures_are_counted_outside_the_game_state(monkeypatch):
+    calls = _fake(monkeypatch)
+    with TestClient(app):
+        host = _client("artcount")
+        host.put("/api/me/xai-key", json={"key": FAKE_KEY})
+        gid = host.post("/api/games", json={"name": "A", "character_id": _character(host, "Ash"),
+                                            "settings": {"ruleset": "2024"}}).json()["id"]
+        db = SessionLocal()
+        try:
+            ctx = load(db, gid)
+            ctx.state["location"] = {"name": "Count Keep", "settlement_id": None, "description": "Unique place 7781."}
+            ctx.save()
+            db.commit()
+            stale = load(SessionLocal(), gid)  # a DM turn that loaded the game before the art was made
+        finally:
+            db.close()
+        asyncio.run(art.refresh_game_art(gid))
+        assert len(calls) == 1
+        stale.save()  # ...and saves over the state afterwards
+        stale.db.commit()
+        stale.db.close()
+        db = SessionLocal()
+        try:
+            from app.models import Game
+            assert db.get(Game, gid).art_count == 1
+        finally:
+            db.close()
