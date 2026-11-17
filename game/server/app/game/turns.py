@@ -211,6 +211,10 @@ def brief(enc: dict, chars: dict, tid: str) -> str:
         who = " (acting now)" if o["id"] == tid else ""
         legend.append(f"{mark} {o['name']}{who} at ({o['x']},{o['y']})" + ("" if o["id"] == tid else f", {d} ft away")
                       + f" — {stats}" + (f"; conditions: {', '.join(cond)}" if cond else ""))
+    for b in enc.get("bystanders") or []:  # friendly NPCs on the field: they move only when you move them (move_npc)
+        if 0 <= b["y"] < h and 0 <= b["x"] < w:
+            grid[b["y"]][b["x"]] = "&"
+        legend.append(f"& {b['name']} (NPC, not a combatant) at ({b['x']},{b['y']}), {combat.dist(t, b)} ft away")
     head = "    " + "".join(str(x // 10) if x >= 10 else " " for x in range(w)) + "\n    " + "".join(str(x % 10) for x in range(w))
     rows = "\n".join(f"{y:>3} " + "".join(r) for y, r in enumerate(grid))
     props: dict[str, list[str]] = {}

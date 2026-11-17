@@ -92,6 +92,17 @@ class OfflineEngine:
                 res = call_tool("travel", args)
                 out.append(f"The party sets out. {res}" if not res.startswith("Error") else
                            "The way is blocked; the party stays put.")
+            elif reason == "round" and (cast := next(((w, re.search(r"\bcasts? ([a-z' ]+?)(?: on ([a-z' ]+?))?\s*[.!,]", t.lower()))
+                                                     for w, t in acts if re.search(r"\bcasts? ", t.lower())), None)) and cast[1]:
+                who, m = cast
+                args = {"caster": who.split(" (")[0], "spell": m.group(1).strip()}
+                if m.group(2) and m.group(2).strip() not in ("me", "myself", "himself", "herself"):
+                    args["target"] = m.group(2).strip()
+                elif m.group(2):
+                    args["target"] = args["caster"]
+                res = call_tool("cast_spell", args)
+                out.append(f"{args['caster']} weaves the spell. ({res})" if not res.startswith("Error") else
+                           f"The magic doesn't come. ({res})")
             elif any(w in text for w in ("shop", "buy", "market", "store", "sell", "trade")):
                 call_tool("open_shop", {"shop_type": "blacksmith" if any(w in text for w in ("weapon", "armor", "armour", "smith"))
                                         else "general", "name": "The Copper Kettle", "keeper": "Oswin, a nervous gnome"})
@@ -179,6 +190,14 @@ def _offline_combat_turn(body: str, call_tool: ToolCaller) -> list[str]:
         elif reach:
             weapons.append((m.group(1), m.group(2), "reach", int(reach.group(1)),
                             int(thrown.group(1)) if thrown else int(reach.group(1))))
+    cast = re.search(r"\bcasts? ([a-z' ]+?)(?: on ([a-z' ]+?))?\s*[.!,]", text + ".")
+    if cast:  # a spell the game resolves: the player then rolls for it
+        args = {"spell": cast.group(1).strip()}
+        if cast.group(2):
+            args["target"] = name if cast.group(2).strip() in ("me", "myself") else cast.group(2).strip()
+        res = call_tool("combat_cast", args)
+        if not res.startswith("Error"):
+            return [f"(Offline test DM.) {name} casts {args['spell']}. ({res})"]
     for act in ("dodge", "dash", "disengage"):
         if act in text:
             call_tool("combat_action", {"action": act})

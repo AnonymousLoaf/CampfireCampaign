@@ -151,3 +151,83 @@ def test_fight_starts_on_the_scene_map_with_bystanders():
             db.close()
 
 
+
+
+def test_fact_sheet_is_kept_shown_to_the_dm_and_hidden_from_players():
+    from fastapi.testclient import TestClient
+
+    from app.db import SessionLocal
+    from app.dm import prompt
+    from app.dm.tools import FACTS_MAX, ToolBox
+    from app.game.state import load
+    from app.main import app
+
+    from .test_chat import _character, _client
+
+    with TestClient(app):
+        host = _client("facthost")
+        gid = host.post("/api/games", json={"name": "F", "character_id": _character(host, "Teft"),
+                                            "settings": {"ruleset": "2024"}}).json()["id"]
+        db = SessionLocal()
+        try:
+            ctx = load(db, gid)
+            tb = ToolBox(ctx)
+            assert tb.call("note_facts", {"set": {"Shaft": "60 rungs; rung 43 flinches", "Teft": "rung 20"}}).startswith("Fact")
+            tb.call("note_facts", {"set": {"Teft": "rung 43, slipping"}, "remove": ["Shaft"]})
+            assert ctx.state["facts"] == {"Teft": "rung 43, slipping"}
+            msg = prompt.turn_message(ctx, "round", "x", [])
+            assert "## Fact sheet" in msg and "- Teft: rung 43, slipping" in msg
+            tb.call("note_facts", {"set": {f"f{i}": "x" for i in range(FACTS_MAX + 5)}})
+            assert len(ctx.state["facts"]) == FACTS_MAX and "Teft" not in ctx.state["facts"]  # oldest go first
+            ctx.save()
+            db.commit()
+        finally:
+            db.close()
+        assert "f44" not in host.get(f"/api/games/{gid}/view").text  # players never see the sheet
+
+
+def test_dm_moves_friendly_npcs_during_a_fight():
+    from fastapi.testclient import TestClient
+
+    from app.db import SessionLocal
+    from app.dm.tools import ToolBox
+    from app.game import turns
+    from app.game.state import load
+    from app.main import app
+
+    from .test_chat import _character, _client
+
+    cave = ["##############",
+            "#............#",
+            "#............#",
+            "#............#",
+            "##############"]
+    with TestClient(app):
+        host = _client("npcmover")
+        gid = host.post("/api/games", json={"name": "M", "character_id": _character(host, "Ash"),
+                                            "settings": {"ruleset": "2024", "rolls": "auto"}}).json()["id"]
+        db = SessionLocal()
+        try:
+            ctx = load(db, gid)
+            tb = ToolBox(ctx)
+            tb.call("draw_scene_map", {"terrain": "cave", "rows": cave, "party_at": {"x": 2, "y": 2},
+                                       "npcs": [{"name": "Pim", "x": 3, "y": 2},
+                                                {"name": "Wolf pack", "x": 11, "y": 2, "hostile": True}]})
+            tb.call("start_combat", {"monsters": [{"name": "Wolf", "count": 1}], "terrain": "road"})
+            enc = ctx.state["encounter"]
+            assert tb.call("move_npc", {"name": "pim", "x": 1, "y": 1}) .startswith("Pim moves to (1, 1)")
+            assert ctx.state["scene_map"]["npcs"][0]["x"] == 1  # kept in step with the scene map
+            far = tb.call("move_npc", {"name": "Pim", "x": 12, "y": 3, "feet": 10})
+            assert "as far as they could get" in far
+            b = enc["bystanders"][0]
+            assert abs(b["x"] - 1) <= 2 and abs(b["y"] - 1) <= 2  # 10 ft = two squares
+            assert tb.call("move_npc", {"name": "Pim", "toward": "Ash"}).startswith("Pim moves")
+            assert tb.call("move_npc", {"name": "Captain Vane", "enter": True, "x": 2, "y": 3}).startswith("Captain Vane enters")
+            pc = next(t for t in enc["tokens"].values() if t["kind"] == "pc")
+            brief = turns.brief(enc, ctx.chars, pc["id"])
+            assert "& Pim (NPC, not a combatant)" in brief and "& Captain Vane" in brief
+            assert tb.call("move_npc", {"name": "Vane", "leave": True}) == "Captain Vane leaves the map."
+            assert [o["name"] for o in enc["bystanders"]] == ["Pim"]
+            assert tb.call("move_npc", {"name": "Nobody", "x": 1, "y": 1}).startswith("Error")
+        finally:
+            db.close()
