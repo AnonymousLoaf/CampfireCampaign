@@ -1614,7 +1614,9 @@ def hp_state(t: dict, chars: dict) -> str:
         hp, mx = t["hp"], t["hp_max"]
     if hp <= 0:
         return "down" if t["kind"] == "pc" else "dead"
-    return "bloodied" if hp <= mx // 2 else "healthy"
+    if hp <= mx // 2:
+        return "bloodied"
+    return "hurt" if hp < mx else "healthy"
 
 
 def view(enc: dict, chars: dict, controls: list[str], prefer: str | None = None) -> dict:

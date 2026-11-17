@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
-import type { GameView, Me, TravelTo } from "../api/types";
+import type { GameView, Me } from "../api/types";
 import { subscribe } from "../api/ws";
 import { navigate } from "../router";
 import { GameContext, controlsOf, type GameCtx } from "../components/game/gameContext";
@@ -41,7 +41,14 @@ export default function GameScreen({ gameId, me }: { gameId: string; me: Me }) {
       setView(v);
       setLoadErr(null);
     } catch (e) {
-      setLoadErr(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      // The host deleted the game, or I was removed from it: leave the stale screen.
+      if (/game not found|not in this game/i.test(msg)) {
+        setView(null);
+        setLoadErr(/not found/i.test(msg) ? "This game was deleted by its host." : "You're no longer in this game.");
+        return;
+      }
+      setLoadErr(msg);
     }
   }, [gameId]);
 
@@ -129,8 +136,6 @@ function GameLoaded({
   const [actingId, setActingId] = useState<string | null>(view.me.character_id ?? controls[0] ?? null);
   const [viewedId, setViewedId] = useState<string | null>(view.me.character_id ?? Object.keys(view.characters)[0] ?? null);
   const [mapTab, setMapTab] = useState<"world" | "battle">(view.encounter ? "battle" : "world");
-  const [destination, setDestination] = useState<TravelTo>(null);
-  const [destLabel, setDestLabel] = useState<string | null>(null);
   const [modal, setModal] = useState<null | "shop" | "settings" | "tv">(null);
   const [levelUpFor, setLevelUpFor] = useState<string | null>(null);
   const isMobile = useIsMobile();
@@ -180,12 +185,6 @@ function GameLoaded({
     if (view.phase.type !== "shop" && modal === "shop" && !view.shop) setModal(null);
   }, [view.phase.type, view.phase.id, view.shop, modal]);
 
-  // Clear a travel destination once a new phase opens.
-  useEffect(() => {
-    setDestination(view.phase.my_submission?.travel_to ?? null);
-    if (!view.phase.my_submission?.travel_to) setDestLabel(null);
-  }, [view.phase.id]); // eslint-disable-line react-hooks/exhaustive-deps
-
   // Combat is typed: whoever's turn it is describes what they do. Track only whose turn it is.
   const enc = view.encounter;
   const myTurn = !!enc && view.phase.type === "combat" && enc.my_turn && !!enc.my_token_id;
@@ -226,7 +225,6 @@ function GameLoaded({
 
   // My own token on the battle map (for "N ft from you" on the info card).
   const viewerTokenId = enc?.tokens.find((t) => t.kind === "pc" && t.character_id === (actingId ?? view.me.character_id))?.id ?? null;
-  const canPickTravel = view.phase.type === "exploration" && (view.game.settings.input_mode !== "single" || !!view.me.is_speaker || (view.me.is_host && !view.game.settings.speaker_id));
 
   const composer = (() => {
     if (spectator) {
@@ -248,14 +246,7 @@ function GameLoaded({
         );
       case "exploration":
         return (
-          <ExplorationComposer
-            destination={destination}
-            destinationLabel={destLabel}
-            clearDestination={() => {
-              setDestination(null);
-              setDestLabel(null);
-            }}
-          />
+          <ExplorationComposer />
         );
       case "roll":
         return <RollComposer />;
@@ -293,6 +284,14 @@ function GameLoaded({
           if (isMobile) setMobileTab("sheet");
         }}
         onNudge={view.me.is_host ? (uid) => void run(() => api.nudge(gameId, uid)) : undefined}
+        onRemove={
+          view.me.is_host
+            ? (uid, name) => {
+                if (window.confirm(`Remove ${name} from the party? Their player leaves the game; the character keeps everything they've earned.`))
+                  void run(() => api.removePlayer(gameId, uid));
+              }
+            : undefined
+        }
         controls={controls}
         onLevelUp={(id) => setLevelUpFor(id)}
       />
@@ -361,20 +360,7 @@ function GameLoaded({
             <div className="map-area">
               {mapTab === "world" &&
                 (view.world ? (
-                  <WorldMap
-                    world={view.world}
-                    destination={destination}
-                    locationName={view.location?.name}
-                    interactive
-                    onPick={
-                      canPickTravel
-                        ? (t, label) => {
-                            setDestination(t);
-                            setDestLabel(label);
-                          }
-                        : undefined
-                    }
-                  />
+                  <WorldMap world={view.world} locationName={view.location?.name} interactive />
                 ) : (
                   <div className="map-empty muted">The world map appears when the game starts.</div>
                 ))}

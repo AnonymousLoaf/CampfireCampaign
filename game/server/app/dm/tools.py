@@ -138,8 +138,15 @@ TOOLS: list[dict] = [
          "name": {"type": "string", "description": "Shop name"}, "keeper": {"type": "string", "description": "Shopkeeper name and one-line description"}},
          "required": ["shop_type", "name", "keeper"]}},
     {"name": "travel",
-     "description": "Move the party on the world map to a settlement or place of interest by name. Returns the days taken and the terrain.",
-     "input_schema": {"type": "object", "properties": {"destination": {"type": "string"}}, "required": ["destination"]}},
+     "description": "Move the party on the world map once they've agreed where to go. Give a settlement or place of "
+                    "interest by name, or, for open country, a compass direction and how far (in days; a day is about "
+                    "4 hexes, 24 miles on easy ground). Returns the days taken and the terrain.",
+     "input_schema": {"type": "object", "properties": {
+         "destination": {"type": "string", "description": "A place name from the world map"},
+         "direction": {"type": "string", "enum": ["north", "northeast", "east", "southeast", "south", "southwest",
+                                                  "west", "northwest"]},
+         "days": {"type": "number", "minimum": 0.25, "maximum": 10, "description": "With direction: how far to go"}},
+         "required": []}},
     {"name": "set_scene",
      "description": "Update the current location, its description, time of day and weather; optionally advance the clock.",
      "input_schema": {"type": "object", "properties": {
@@ -235,7 +242,7 @@ class ToolBox:
             r = dice.d20(bonus, adv)
             ok = r["total"] >= dc
             if not hidden:
-                self.ctx.log("roll", f"{s['name']} — {label}: {r['total']} vs DC {dc} — {'success' if ok else 'failure'}.",
+                self.ctx.log("roll", f"{s['name']} — {label}{two_dice(r)}: {r['total']} vs DC {dc} — {'success' if ok else 'failure'}.",
                              None, {"roll": r, "dc": dc, "character_id": cid})
             if r["natural"] == 20 and not s.get("inspiration"):
                 s["inspiration"] = True
@@ -539,10 +546,17 @@ class ToolBox:
         return (f"The shop screen opens for the players after your narration ({len(stock)} kinds of goods). "
                 f"Describe the shop and keeper briefly; don't list prices — players browse themselves.")
 
-    def t_travel(self, destination: str) -> str:
+    def t_travel(self, destination: str | None = None, direction: str | None = None, days: float = 1) -> str:
         w = self.ctx.world
         if not w:
             raise RulesError("there is no world map yet")
+        if not destination:
+            if not direction:
+                raise RulesError("give a destination by name, or a direction and how many days")
+            dest = hexmap.hex_toward(w, direction, max(1, round(float(days) * hexmap.HEXES_PER_DAY)))
+            if not dest:
+                raise RulesError(f"the party can't head {direction} from here (water or the edge of the map)")
+            return do_travel(self.ctx, dest)
         key = destination.strip().lower()
         place = next((s for s in w["settlements"] + w["pois"] if s["name"].lower() == key or s["id"] == key), None) or \
             next((s for s in w["settlements"] + w["pois"] if key in s["name"].lower()), None)
@@ -651,9 +665,17 @@ def roll_pending(ctx: Ctx, roll: dict) -> dict:
     roll["result"] = {"total": r["total"], "rolls": r["rolls"], "modifier": bonus, "natural": r["natural"], "success": ok}
     if s and r["natural"] == 20 and not s.get("inspiration"):
         s["inspiration"] = True
-    ctx.log("roll", f"{roll['label']}: {r['total']}" + (f" vs DC {roll['dc']} — {'success' if ok else 'failure'}" if roll.get("dc") else "") + ".",
+    ctx.log("roll", f"{roll['label']}{two_dice(r)}: {r['total']}" + (f" vs DC {roll['dc']} — {'success' if ok else 'failure'}" if roll.get("dc") else "") + ".",
             None, {"roll": r, "dc": roll.get("dc"), "character_id": roll["character_id"]})
     return roll
+
+
+def two_dice(r: dict) -> str:
+    """' (advantage: rolled 3 and 2, kept 3)' for a roll with advantage or disadvantage, else ''."""
+    rolls = r.get("rolls") or []
+    if len(rolls) != 2 or r.get("advantage") not in ("advantage", "disadvantage"):
+        return ""
+    return f" ({r['advantage']}: rolled {rolls[0]} and {rolls[1]}, kept {r['natural']})"
 
 
 def _roll_combat(ctx: Ctx, roll: dict) -> dict:

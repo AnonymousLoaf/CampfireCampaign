@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
+import { HoverInfo, RulesText, Term } from "../RulesText";
+import { SpellDetails } from "../SpellPick";
 import { api } from "../../api/client";
-import type { Attack, CharacterView, Encounter, RestKind, TravelTo } from "../../api/types";
+import type { Attack, CharacterView, Encounter, PendingRoll, RestKind } from "../../api/types";
 import { useGame } from "./gameContext";
 
 const QUICK = [
@@ -18,15 +20,7 @@ function speakerName(view: ReturnType<typeof useGame>["view"]): string {
   return view.members.find((m) => m.user_id === id)?.display_name ?? "The host";
 }
 
-export function ExplorationComposer({
-  destination,
-  destinationLabel,
-  clearDestination,
-}: {
-  destination: TravelTo;
-  destinationLabel: string | null;
-  clearDestination: () => void;
-}) {
+export function ExplorationComposer() {
   const { view, gameId, run } = useGame();
   const single = view.game.settings.input_mode === "single";
   const isSpeaker = !!view.me.is_speaker || (single && view.me.is_host && !view.game.settings.speaker_id);
@@ -56,10 +50,10 @@ export function ExplorationComposer({
 
   const submit = async () => {
     setBusy(true);
-    await run(() => api.submitAction(gameId, text.trim(), destination, rest));
+    await run(() => api.submitAction(gameId, text.trim(), null, rest));
     setBusy(false);
   };
-  const canSubmit = !!text.trim() || !!destination || !!rest;
+  const canSubmit = !!text.trim() || !!rest;
   const restRule = view.game.settings.rest_rule;
   const restHint =
     restRule === "gritty" ? { short: "8 hours", long: "7 days" } : restRule === "epic" ? { short: "5 min", long: "1 hour" } : { short: "1 hour", long: "8 hours" };
@@ -106,16 +100,7 @@ export function ExplorationComposer({
         }}
       />
       <div className="composer-row">
-        {destination ? (
-          <span className="dest-chip">
-            🧭 Travel to {destinationLabel ?? "selected hex"}
-            <button className="icon-btn tiny" onClick={clearDestination} aria-label="Clear destination">
-              ✕
-            </button>
-          </span>
-        ) : (
-          <span className="muted small">Tip: click the map to propose a travel destination.</span>
-        )}
+        <span className="muted small">Want to travel? Say where — "we take the east road to the next town." Click the map to see what you know about a place.</span>
         <div className="grow" />
         {mine && (
           <button className="btn ghost small" disabled={busy} onClick={() => void run(() => api.withdrawAction(gameId))}>
@@ -147,8 +132,7 @@ function Others() {
         return (
           <div key={s.user_id} className="other-action">
             <strong style={{ color: c?.color }}>{c?.name ?? m?.display_name ?? "Someone"}:</strong>{" "}
-            {s.text || <em className="muted">{s.rest ? "(rest)" : "(travel only)"}</em>}
-            {s.travel_to && <span className="muted small"> · 🧭 travel</span>}
+            {s.text || <em className="muted">{s.rest ? "(rest)" : "(no words)"}</em>}
             {s.rest && <span className="muted small"> · {s.rest === "short" ? "☕ short rest" : "🌙 long rest"}</span>}
             {s.edited && (
               <span className="edited-tag" title={s.updated_at ? `Edited ${new Date(s.updated_at).toLocaleString()}` : "Edited"}>
@@ -182,6 +166,7 @@ export function RollComposer() {
                 {r.dc !== null && <span className="badge">DC {r.dc}</span>}
                 {r.advantage !== "normal" && <span className={`badge ${r.advantage === "advantage" ? "green" : "red"}`}>{r.advantage}</span>}
               </div>
+              {!r.result && <RollNeed r={r} saveDc={c?.spellcasting?.save_dc} />}
               {r.result ? (
                 <div className="roll-result">
                   <span className="dice-row inline">
@@ -220,6 +205,55 @@ export function RollComposer() {
       </div>
     </div>
   );
+}
+
+/** What a roll needs to succeed, told the way a DM at the table would. */
+function RollNeed({ r, saveDc }: { r: PendingRoll; saveDc?: number }) {
+  const bonus = r.bonus ?? 0;
+  const add = bonus ? ` ${bonus > 0 ? "+" : "−"} ${Math.abs(bonus)}` : "";
+  const adv =
+    r.advantage === "advantage" ? " You roll two d20s and keep the higher." : r.advantage === "disadvantage" ? " You roll two d20s and keep the lower." : "";
+  if (r.dc !== null) {
+    const die = r.dc - bonus;
+    return (
+      <div className="roll-need small">
+        You need a total of <strong>{r.dc}</strong> or more (d20{add}) —{" "}
+        {die <= 1 ? (
+          <>you can't fail this one.</>
+        ) : die > 20 ? (
+          <>even a 20 on the die falls short.</>
+        ) : (
+          <>
+            a <strong>{die}</strong> or higher on the die.
+          </>
+        )}
+        {adv}
+      </div>
+    );
+  }
+  if (r.check === "combat" && bonus) {
+    return (
+      <div className="roll-need small">
+        d20{add} to hit. You hit if the total meets the target's <Term k="armor-class">Armor Class</Term> — the DM keeps that number to
+        themselves, as at the table. A natural 20 always hits (a <Term k="critical-hit">critical hit</Term>); a natural 1 always misses.{adv}
+      </div>
+    );
+  }
+  if (r.check === "combat") {
+    return (
+      <div className="roll-need small">
+        {saveDc ? (
+          <>
+            The target makes a <Term k="saving-throw">saving throw</Term> against your <Term k="spell-save-dc">spell save DC</Term> of{" "}
+            <strong>{saveDc}</strong>; your roll is the spell's damage or effect.
+          </>
+        ) : (
+          <>Your roll decides how well it works.</>
+        )}
+      </div>
+    );
+  }
+  return null;
 }
 
 export function ShopComposer({ onOpenShop }: { onOpenShop: () => void }) {
@@ -430,13 +464,31 @@ export function CombatReference({ c, budget, collapsed = false }: { c: Character
           {sc.cantrips.length > 0 && (
             <div className="ref-row">
               <span className="muted">Cantrips</span>
-              <span>{sc.cantrips.map((s) => s.name).join(", ")}</span>
+              <span>
+                {sc.cantrips.map((s, i) => (
+                  <span key={s.index}>
+                    {i > 0 && ", "}
+                    <HoverInfo info={<SpellDetails s={s} />} wide>
+                      {s.name}
+                    </HoverInfo>
+                  </span>
+                ))}
+              </span>
             </div>
           )}
           {leveled.length > 0 && (
             <div className="ref-row">
               <span className="muted">Prepared</span>
-              <span>{leveled.map((s) => `${s.name} (${s.level})`).join(", ")}</span>
+              <span>
+                {leveled.map((s, i) => (
+                  <span key={s.index}>
+                    {i > 0 && ", "}
+                    <HoverInfo info={<SpellDetails s={s} />} wide>
+                      {s.name} ({s.level})
+                    </HoverInfo>
+                  </span>
+                ))}
+              </span>
             </div>
           )}
         </div>
@@ -446,17 +498,17 @@ export function CombatReference({ c, budget, collapsed = false }: { c: Character
           <div className="ref-label">Features</div>
           <div className="ref-feats">
             {actions.map((a) => (
-              <span key={a.id} className={`ref-chip ${a.available ? "" : "used"}`} title={a.description}>
+              <HoverInfo key={a.id} className={`ref-chip ${a.available ? "" : "used"}`} info={<FeatureInfo name={a.name} text={a.description} />}>
                 {a.name}
                 <span className="muted">
                   {" "}
                   · {a.kind === "bonus" ? "bonus" : a.kind}
                   {a.uses ? ` · ${a.uses.max - a.uses.used}/${a.uses.max}` : ""}
                 </span>
-              </span>
+              </HoverInfo>
             ))}
             {otherFeatures.map((f) => (
-              <span key={f.name} className="ref-chip" title={f.description}>
+              <HoverInfo key={f.name} className="ref-chip" info={<FeatureInfo name={f.name} text={f.description} />}>
                 {f.name}
                 {f.uses && (
                   <span className="muted">
@@ -464,7 +516,7 @@ export function CombatReference({ c, budget, collapsed = false }: { c: Character
                     · {f.uses.max - f.uses.used}/{f.uses.max}
                   </span>
                 )}
-              </span>
+              </HoverInfo>
             ))}
           </div>
         </div>
@@ -480,4 +532,14 @@ export function CombatReference({ c, budget, collapsed = false }: { c: Character
     );
   }
   return body;
+}
+function FeatureInfo({ name, text }: { name: string; text: string }) {
+  return (
+    <>
+      <div className="rules-pop-title">{name}</div>
+      <div className="pre">
+        <RulesText text={text} />
+      </div>
+    </>
+  );
 }

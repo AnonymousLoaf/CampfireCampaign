@@ -1,11 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { getPrefs, prefersReducedMotion } from "../util/prefs";
+import Dice3D from "./Dice3D";
 
 export interface DiceShow {
+  /** "attack" shows Hit/Miss instead of Success/Failure. */
+  kind?: "check" | "attack";
   natural: number;
   total: number;
   modifier?: number;
   rolls?: number[];
+  /** With advantage or disadvantage two d20s hit the table and one is kept. */
+  advantage?: string;
   dc?: number | null;
   success?: boolean | null;
   label?: string;
@@ -42,11 +47,18 @@ export function D20Icon({ value, size = 22, tone, title }: { value?: number | st
 
 type Shown = DiceShow & { key: number };
 
-/** Overlay that tumbles a d20 for each queued roll, then shows the result (total, DC verdict). */
+/** The table size for the rolling die. */
+function tableSize(variant: "game" | "tv"): { w: number; h: number } {
+  if (variant === "tv") return { w: Math.min(760, window.innerWidth * 0.8), h: Math.min(400, window.innerHeight * 0.45) };
+  return { w: Math.min(380, window.innerWidth - 56), h: 210 };
+}
+
+/** Overlay for everyone in the game: a d20 rolls across a felt table, lands on the real result, then the total
+ * and verdict appear. Rolls queue up so a burst of them plays one after another. */
 export default function DiceRoller({ variant = "game" }: { variant?: "game" | "tv" }) {
   const [cur, setCur] = useState<Shown | null>(null);
   const [phase, setPhase] = useState<"tumble" | "land">("tumble");
-  const [face, setFace] = useState(1);
+  const [reduced, setReduced] = useState(false);
   const q = useRef<Shown[]>([]);
   const n = useRef(0);
   const busy = useRef(false);
@@ -59,10 +71,10 @@ export default function DiceRoller({ variant = "game" }: { variant?: "game" | "t
       return;
     }
     busy.current = true;
-    const reduced = prefersReducedMotion();
+    const r = prefersReducedMotion();
+    setReduced(r);
     setCur(d);
-    setPhase(reduced ? "land" : "tumble");
-    setFace(reduced ? d.natural : 1 + Math.floor(Math.random() * 20));
+    setPhase(r ? "land" : "tumble");
   };
 
   useEffect(() => {
@@ -77,48 +89,57 @@ export default function DiceRoller({ variant = "game" }: { variant?: "game" | "t
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Tumble → land → hold → next.
+  // The die calls back when it lands; then hold the result a moment → next.
   useEffect(() => {
-    if (!cur) return;
-    if (phase === "tumble") {
-      const spin = window.setInterval(() => setFace(1 + Math.floor(Math.random() * 20)), 70);
-      const land = window.setTimeout(() => {
-        window.clearInterval(spin);
-        setFace(cur.natural);
-        setPhase("land");
-      }, 1000);
-      return () => {
-        window.clearInterval(spin);
-        window.clearTimeout(land);
-      };
-    }
-    const hold = window.setTimeout(next, q.current.length ? 1300 : 2200);
+    if (!cur || phase !== "land") return;
+    const hold = window.setTimeout(next, q.current.length ? 1400 : 2600);
     return () => window.clearTimeout(hold);
   }, [cur, phase]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!cur) return null;
   const landed = phase === "land";
-  const tone = landed ? (cur.natural === 20 ? "crit" : cur.natural === 1 ? "fumble" : "") : "";
-  const verdict = cur.success === true ? "Success" : cur.success === false ? "Failure" : null;
+  const finalTone = cur.natural === 20 ? "crit" : cur.natural === 1 ? "fumble" : "";
+  const tone = landed ? finalTone : "";
+  const verdict =
+    cur.success == null ? null : cur.kind === "attack" ? (cur.success ? "Hit" : "Miss") : cur.success ? "Success" : "Failure";
   const mod = cur.modifier ?? cur.total - cur.natural;
+  const size = tableSize(variant);
+  const dieColor = cur.color && /^#[0-9a-f]{6}$/i.test(cur.color) ? cur.color : "#8b1e1e";
+  const pair =
+    cur.rolls && cur.rolls.length === 2 && (cur.advantage === "advantage" || cur.advantage === "disadvantage") ? cur.rolls : null;
+  const kept = pair ? (pair[0] === cur.natural ? 0 : 1) : 0;
+  const dieTone = (v: number) => (v === 20 ? "crit" : v === 1 ? "fumble" : "");
 
   return (
     <div className={`dice-overlay ${variant}`} aria-live="polite" onClick={() => next()} title="Click to skip">
       <div key={cur.key} className={`dice-stage ${phase} ${tone}`}>
-        <div className="dice-die">
-          <D20Icon value={face} size={variant === "tv" ? 200 : 104} tone={tone as "crit" | "fumble" | ""} />
-          {tone === "crit" && (
-            <span className="dice-rays" aria-hidden>
-              {Array.from({ length: 12 }).map((_, i) => (
-                <i key={i} style={{ transform: `rotate(${i * 30}deg)` }} />
-              ))}
-            </span>
-          )}
-          {tone === "fumble" && (
-            <svg className="dice-crack" viewBox="0 0 100 100" aria-hidden>
-              <path d="M38,8 L46,30 L36,44 L52,58 L44,74 L56,94" />
-              <path d="M52,58 L68,62 L74,76" />
-            </svg>
+        <div className={`dice-table ${pair ? "pair" : ""}`}>
+          {pair ? (
+            pair.map((v, i) => (
+              <div key={i} className={`dice-slot ${landed && i !== kept ? "dropped" : ""}`}>
+                <Dice3D
+                  value={v}
+                  color={dieColor}
+                  tone={dieTone(v)}
+                  width={size.w / 2}
+                  height={size.h}
+                  from={i === 0 ? "left" : "right"}
+                  duration={i === 0 ? 1700 : 1900}
+                  instant={reduced}
+                  onLanded={i === 1 ? () => setPhase("land") : undefined}
+                />
+              </div>
+            ))
+          ) : (
+            <Dice3D
+              value={cur.natural}
+              color={dieColor}
+              tone={finalTone}
+              width={size.w}
+              height={size.h}
+              instant={reduced}
+              onLanded={() => setPhase("land")}
+            />
           )}
         </div>
         <div className="dice-info">
@@ -128,6 +149,12 @@ export default function DiceRoller({ variant = "game" }: { variant?: "game" | "t
               {cur.who && <strong>{cur.who}</strong>}
               {cur.who && cur.label ? " — " : ""}
               {cur.label}
+            </div>
+          )}
+          {pair && (
+            <div className="dice-adv small">
+              {cur.advantage === "advantage" ? "Advantage" : "Disadvantage"} — two d20s
+              {landed ? `: ${pair[0]} and ${pair[1]}, keeps the ${cur.advantage === "advantage" ? "higher" : "lower"} (${cur.natural})` : ", keep the " + (cur.advantage === "advantage" ? "higher" : "lower")}
             </div>
           )}
           <div className={`dice-total ${landed ? "shown" : ""}`}>

@@ -58,6 +58,27 @@ export default function LobbyScreen({
     }
   };
 
+  const act = async (fn: () => Promise<unknown>) => {
+    try {
+      await fn();
+      void load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+  const deleteGame = (g: GameSummary) => {
+    if (!window.confirm(`Delete "${g.name}" for everyone? The story, map and log are gone for good. Characters are kept and become free for other games.`)) return;
+    void act(() => api.deleteGame(g.id));
+  };
+  const leaveGame = (g: GameSummary) => {
+    const msg =
+      g.role === "spectator"
+        ? `Stop following "${g.name}"?`
+        : `Leave "${g.name}"? Your character keeps everything they've earned and becomes free for another game. You'd need a new invite to come back (before the game starts) — after that, only as a spectator.`;
+    if (!window.confirm(msg)) return;
+    void act(() => api.leave(g.id));
+  };
+
   const freeCharacters = (characters ?? []).filter((c) => !c.game_id);
 
   return (
@@ -123,6 +144,17 @@ export default function LobbyScreen({
                         ⏳ {formatCountdown(g.deadline, now)}
                       </span>
                     )}
+                    <div className="game-row-actions" onClick={(e) => e.stopPropagation()}>
+                      {g.role === "host" ? (
+                        <button className="btn ghost small danger" onClick={() => deleteGame(g)}>
+                          Delete game
+                        </button>
+                      ) : (
+                        <button className="btn ghost small" onClick={() => leaveGame(g)}>
+                          {g.role === "spectator" ? "Stop watching" : "Leave game"}
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </li>
               ))}
@@ -153,6 +185,10 @@ export default function LobbyScreen({
                   key={c.id}
                   c={c}
                   onDelete={c.game_id ? undefined : () => deleteCharacter(c.id)}
+                  onLeaveGame={(() => {
+                    const g = c.game_id ? games?.find((x) => x.id === c.game_id) : undefined;
+                    return g && g.role !== "host" ? () => leaveGame(g) : undefined;
+                  })()}
                   onLevelUp={c.game_id ? undefined : () => setLevelUpFor(c.id)}
                   onChanged={() => void load()}
                 />

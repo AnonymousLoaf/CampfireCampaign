@@ -42,11 +42,25 @@ RECAP_SYSTEM = ("You summarise a D&D campaign's recent events for a player who w
                  "plain prose in past tense: what happened, where the party is now, and what is waiting on them. "
                  "No headings, no lists, no invented details.")
 
+STORY_SYSTEM = ("You keep the 'story so far' for a D&D campaign, read by its players. You get your previous write-up "
+                "(if any) and everything that has happened since. Rewrite the whole story so far as a summary in plain "
+                "past-tense prose: a short paragraph per chapter of the adventure (arrival, a quest taken, a fight, a "
+                "discovery, a journey), naming the people, places and items that matter, and ending with where the party "
+                "is now and what is waiting on them. Keep it to about 150-450 words, shorter while the story is young. "
+                "Only what the players saw or learned — no secrets, no guesses, no invented details. No headings or "
+                "lists; separate paragraphs with a blank line.")
+
 
 class OfflineEngine:
     name = "offline"
 
     async def summarize(self, system: str, user: str) -> str:
+        if system is STORY_SYSTEM:  # no AI: the opening lines of each narration, oldest first
+            prev = user.split("\n\nWhat has happened since", 1)[0].split(":\n", 1)[-1].strip()
+            prev = "" if prev.startswith("(none") else prev
+            beats = [re.split(r"(?<=[.!?])\s", re.sub(r"^- \[narration[^\]]*\]\s*", "", l.strip()), maxsplit=1)[0]
+                     for l in user.split("\n") if l.startswith("- [narration")]
+            return "\n\n".join(p for p in [prev, " ".join(beats[-12:])] if p) or "The story hasn't begun yet."
         items = [re.sub(r"^- \[[^\]]*\]\s*", "• ", l.strip()) for l in user.split("\n") if l.startswith("- ")]
         items = [i if len(i) < 220 else i[:217] + "…" for i in items]
         return "While you were away:\n" + "\n".join(items[-8:]) if items else "Nothing much happened while you were away."
@@ -69,7 +83,16 @@ class OfflineEngine:
         elif reason in ("round", "rolls"):
             acts = re.findall(r"^- (.+?): (.+)$", body, re.M)
             text = body.lower()
-            if any(w in text for w in ("shop", "buy", "market", "store", "sell", "trade")):
+            places = re.findall(r"^- (.+?) \(id [sp]\d+\)", system + "\n" + user, re.M)
+            going = re.search(r"\b(travel|head|go|set out|ride|walk|journey|march|make for)\b", text)
+            place = next((p for p in places if p.lower() in text), None) if going else None
+            heading = re.search(r"\b(north|south|east|west)(east|west)?\b", text) if going else None
+            if place or heading:
+                args = {"destination": place} if place else {"direction": heading.group(0), "days": 1}
+                res = call_tool("travel", args)
+                out.append(f"The party sets out. {res}" if not res.startswith("Error") else
+                           "The way is blocked; the party stays put.")
+            elif any(w in text for w in ("shop", "buy", "market", "store", "sell", "trade")):
                 call_tool("open_shop", {"shop_type": "blacksmith" if any(w in text for w in ("weapon", "armor", "armour", "smith"))
                                         else "general", "name": "The Copper Kettle", "keeper": "Oswin, a nervous gnome"})
                 out.append("Oswin's shop smells of lamp oil and old leather. \"Browse, browse — just mind the shelves.\"")

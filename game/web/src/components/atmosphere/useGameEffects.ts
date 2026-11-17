@@ -6,7 +6,7 @@ import { getPrefs } from "../../util/prefs";
 import { showDice } from "../DiceRoller";
 
 type RollData = {
-  roll?: { natural?: number; total?: number; modifier?: number; rolls?: number[] };
+  roll?: { natural?: number; total?: number; modifier?: number; rolls?: number[]; advantage?: string };
   dc?: number | null;
   character_id?: string;
 };
@@ -63,6 +63,7 @@ export function useGameEffects(view: GameView, opts: { tv?: boolean } = {}) {
               total: r.total,
               modifier: r.modifier,
               rolls: r.rolls,
+              advantage: r.advantage,
               dc,
               success: dc !== null ? r.total >= dc : null,
               label: rollLabel(e.text, c?.name),
@@ -81,10 +82,12 @@ export function useGameEffects(view: GameView, opts: { tv?: boolean } = {}) {
           if (cd.attacker?.startsWith("pc-") && r && typeof r.natural === "number" && typeof r.total === "number") {
             const c = view.characters[cd.attacker.slice(3)];
             showDice({
+              kind: "attack",
               natural: r.natural,
               total: r.total,
               modifier: r.modifier,
               rolls: r.rolls,
+              advantage: r.advantage,
               dc: null,
               success: typeof cd.hit === "boolean" ? cd.hit : null,
               label: cd.attack ? `${cd.attack}${cd.hit && cd.damage ? ` · ${cd.damage} damage` : ""}` : "Attack",

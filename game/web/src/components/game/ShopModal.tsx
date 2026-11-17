@@ -5,6 +5,7 @@ import Modal from "../Modal";
 import CharacterSwitcher from "./CharacterSwitcher";
 import { ReadyList } from "./Composer";
 import { useGame } from "./gameContext";
+import { ItemDescription } from "./SheetTabs";
 
 const SHOP_TYPE_LABEL: Record<string, string> = {
   general: "General store",
@@ -122,7 +123,7 @@ export default function ShopModal({ onClose }: { onClose: () => void }) {
                       {s.properties.length > 0 && ` · ${s.properties.join(", ")}`}
                       {s.weight ? ` · ${s.weight} lb` : ""}
                     </div>
-                    {s.description && <div className="small clamp">{s.description}</div>}
+                    {s.description && <ItemDescription text={s.description} />}
                   </div>
                   <div className="shop-buy">
                     <span className="price">

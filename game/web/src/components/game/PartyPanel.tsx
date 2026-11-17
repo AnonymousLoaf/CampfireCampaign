@@ -42,6 +42,7 @@ export default function PartyPanel({
   selectedId,
   onSelect,
   onNudge,
+  onRemove,
   controls = [],
   onLevelUp,
   readOnly = false,
@@ -50,6 +51,8 @@ export default function PartyPanel({
   selectedId: string | null;
   onSelect: (id: string) => void;
   onNudge?: (userId: string) => void;
+  /** Host only: take a player and their character out of the game. */
+  onRemove?: (userId: string, characterName: string) => void;
   controls?: string[];
   onLevelUp?: (characterId: string) => void;
   /** TV view: show level-up as a passive tag instead of a button. */
@@ -128,6 +131,18 @@ export default function PartyPanel({
                   title="Send a reminder"
                 >
                   nudge
+                </button>
+              )}
+              {onRemove && userId && userId !== view.me.user_id && view.members.some((m) => m.user_id === userId) && (
+                <button
+                  className="link small danger"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRemove(userId, c.name);
+                  }}
+                  title={`Take ${c.name} out of the party (they keep their progress)`}
+                >
+                  remove
                 </button>
               )}
             </div>

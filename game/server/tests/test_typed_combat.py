@@ -69,6 +69,9 @@ def test_typed_combat_loop():
         v, seen_turn, seen_roll = _play([a, b], gid, "I attack the nearest goblin")
         assert seen_turn and seen_roll, "\n".join(l["text"][:160] for l in v["log"][-20:])
         assert any("Victory" in l["text"] or "defeated" in l["text"] for l in v["log"])
+        # the end of the fight reads in order: the roll, the DM's narration, then victory and loot
+        end = next(i for i, l in enumerate(v["log"]) if l["text"].startswith(("Victory", "The party is defeated")))
+        assert v["log"][end - 1]["kind"] == "narration", [l["text"][:80] for l in v["log"][end - 3:end + 2]]
         assert any(l["kind"] == "action" and "nearest goblin" in l["text"] for l in v["log"])
 
 

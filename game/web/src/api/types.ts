@@ -478,6 +478,7 @@ export interface GameSummary {
   max_players: number;
   host_name: string;
   invite_code: string;
+  role: "host" | "player" | "spectator" | null;
 }
 
 export type TravelTo = null | { settlement_id: string } | { q: number; r: number };
@@ -489,6 +490,9 @@ export interface PendingRoll {
   character_id: string;
   label: string;
   dc: number | null;
+  /** What the roll adds to the d20, and which check it is ("combat" for a typed attack or spell). */
+  bonus?: number;
+  check?: string;
   advantage: "normal" | "advantage" | "disadvantage";
   result: null | {
     total: number;
@@ -539,6 +543,7 @@ export interface Poi {
   kind: "ruins" | "cave" | "tower" | "camp" | "shrine";
   q: number;
   r: number;
+  description?: string;
 }
 
 export interface World {
@@ -561,7 +566,7 @@ export interface Token {
   y: number;
   hp: number | null;
   hp_max: number | null;
-  hp_state: "healthy" | "bloodied" | "down" | "dead";
+  hp_state: "healthy" | "hurt" | "bloodied" | "down" | "dead";
   ac: number | null;
   conditions: string[];
   speed: number;

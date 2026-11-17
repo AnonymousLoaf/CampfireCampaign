@@ -133,7 +133,9 @@ Item = {id, key, name, qty, equipped, equippable: bool, usable: bool, category,
 | POST | `/games/join` | `{invite_code, character_id}` | `{id}` |
 | GET | `/games/{id}/view` | – | `GameView` |
 | POST | `/games/{id}/start` | – | ok (host; status lobby → active; world generated; DM opens the story) |
-| POST | `/games/{id}/leave` | – | ok (lobby only) |
+| POST | `/games/{id}/leave` | – | ok — any time except during a fight your character is in; the host can't leave (delete instead). The character keeps its progress and is freed. |
+| POST | `/games/{id}/remove-player` | `{user_id}` | ok — host only; same rules as leave |
+| DELETE | `/games/{id}` | – | ok — host only; deletes the game, its log and DM calls; characters are freed |
 
 `GameSummary = {id, name, status: "lobby"|"active"|"ended", phase_type, deadline, my_turn: bool, player_count, max_players, host_name, invite_code}`
 

@@ -88,9 +88,10 @@ def start_game(ctx: Ctx, uid: str) -> None:
              "update_summary with the campaign's hidden premise so you can stay consistent later.")
 
 
-def queue_dm(ctx: Ctx, reason: str, body: str) -> None:
+def queue_dm(ctx: Ctx, reason: str, body: str, after: list[str] | None = None) -> None:
+    """Ask the DM to narrate. `after` holds game messages (victory, loot) to post once the narration is in."""
     restore = dict(ctx.phase)
-    ctx.state["pending_dm"] = {"reason": reason, "body": body, "restore_phase": restore}
+    ctx.state["pending_dm"] = {"reason": reason, "body": body, "restore_phase": restore, "after": after or []}
     ctx.open_phase("dm")
     spawn(run_dm(ctx.game.id))
 
@@ -457,13 +458,14 @@ def _finish_combat(ctx: Ctx, outcome: str) -> None:
         body += [f"- (custom) {a['name']}: {a['text']}" for a in enc["custom_actions"]]
     party = ctx.living_party()
     conscious = [(cid, s) for cid, s in party if s["hp"] > 0]
+    after: list[str] = []  # posted after the DM narrates the fight's end
     if outcome == "victory":
         each = enc.get("xp", 0) // max(1, len(conscious) or len(party) or 1)
         ups = []
         for _, s in (conscious or party):
             if ctx.settings.get("leveling") == "xp" and ch.award_xp(s, each):
                 ups.append(f"{s['name']} can level up!")
-        ctx.log("event", f"Victory! {each} XP each." + (" " + " ".join(ups) if ups else ""))
+        after.append(f"Victory! {each} XP each." + (" " + " ".join(ups) if ups else ""))
         body.append(f"Outcome: VICTORY. {each} XP each awarded automatically." + (" " + " ".join(ups) if ups else ""))
         mons = [{"cr": t.get("cr", 0), "ctype": t.get("ctype")} for t in enc["tokens"].values() if t["kind"] == "monster"]
         tr = loot.roll_treasure(mons, ctx.settings.get("magic_level", "standard"))
@@ -479,7 +481,7 @@ def _finish_combat(ctx: Ctx, outcome: str) -> None:
             ch.add_item(s, key, 1)
             found.append(f"{srd.item(key)['name']} (to {s['name']})")
         if found:
-            ctx.log("event", "Loot: " + "; ".join(found) + ".")
+            after.append("Loot: " + "; ".join(found) + ".")
             body.append("Loot found (already given out by the game): " + "; ".join(found) + ". Mention it in the narration.")
         else:
             body.append("They found no coin. Grant a plot item with grant_item only if the story calls for it.")
@@ -489,7 +491,7 @@ def _finish_combat(ctx: Ctx, outcome: str) -> None:
                 s["hp"] = 1
                 ch.remove_condition(s, "Unconscious")
                 s["death_saves"] = {"success": 0, "fail": 0}
-        ctx.log("event", "The party is defeated.")
+        after.append("The party is defeated.")
         body.append("Outcome: DEFEAT. Every character fell. Those not dead wake later with 1 HP. Narrate what the enemies "
                     "did with them (captured, robbed, left for dead, rescued) — a setback, not the end of the story.")
     else:
@@ -499,7 +501,7 @@ def _finish_combat(ctx: Ctx, outcome: str) -> None:
         body.append(f"Dead: {', '.join(dead)}.")
     combat.finish(enc, ctx.chars)
     ctx.state["encounter"] = None
-    queue_dm(ctx, "combat_end", "\n".join(body))
+    queue_dm(ctx, "combat_end", "\n".join(body), after)
 
 
 # ── DM calls ────────────────────────────────────────────────────────────────
@@ -580,6 +582,8 @@ async def run_dm(game_id: str) -> None:
     async with lock_for(game_id):
         try:
             ctx.log("narration", result.text, "DM")
+            for line in pd.get("after") or []:
+                ctx.log("event", line)
             ctx.state["pending_dm"] = None
             p_text = _prompt_from(result.text)
             enc = ctx.encounter

@@ -26,6 +26,39 @@ Let friends on your Wi-Fi join with `run.py --lan`, then they open `http://<your
 
 Frontend development with hot reload: run the server as above, then `npm run dev` in `web` and open http://localhost:5173.
 
+## Host it on an always-on machine with your own domain
+
+1. **Clone and set up** as in "Run it on your PC" above (Python 3.11+, Node 20+). `web/dist` and `server/data` aren't in git, so build the web app there.
+2. **Bring your games along (optional):** stop the old server and copy its whole `server/data` folder (the database, `secret.key` that unlocks saved API keys, and the push keys) into `server/data` on the new machine. Without it the new server starts empty.
+3. **Claude Code as the DM:** install Claude Code on that machine, run `claude` once and sign in. Games set to "Claude Code (this PC)" use that login.
+4. **Your domain, through a Cloudflare named tunnel** (the domain's DNS must be on Cloudflare):
+
+   ```powershell
+   cloudflared tunnel login
+   cloudflared tunnel create campfire
+   cloudflared tunnel route dns campfire yourdomain.com
+   ```
+
+   Then create `%USERPROFILE%\.cloudflared\config.yml` (`~/.cloudflared/config.yml` on Linux/macOS) and run the tunnel as a service so it survives reboots:
+
+   ```yaml
+   tunnel: campfire
+   credentials-file: C:\Users\<you>\.cloudflared\<tunnel-id>.json
+   ingress:
+     - hostname: yourdomain.com
+       service: http://localhost:8787
+     - service: http_status:404
+   ```
+
+   ```powershell
+   cloudflared service install
+   ```
+
+5. **Keep the server running:** set `GAME_PUBLIC_URL=https://yourdomain.com` and start `run.py` at boot (Task Scheduler "at startup" on Windows, a systemd unit on Linux). No `--lan` needed; the tunnel connects to localhost.
+6. **Updating:** `git pull`, `npm run build` in `web`, re-run `pip install -r requirements.txt` if it changed, and restart the server (wait until no DM response is in progress).
+
+A Claude subscription is meant for personal use: fine for you and friends, but for a public site switch games to the API-key DM.
+
 ## Choosing the Dungeon Master
 
 Pick per game (and change any time in the ⚙ game settings):
@@ -47,10 +80,25 @@ Combat is played the tabletop way: theatre of the mind, with the battle map as t
 - Everyone rolls initiative and acts **one at a time, in order** — each move changes the next. (Deciding what to do between fights stays asynchronous for the whole party.)
 - On your turn you **type what your character does** ("I duck behind the cart and throw a dagger at the orc's head"). The DM resolves it by the rules: moves your token, spends your action and bonus action, and asks for your rolls.
 - **You roll your own dice**: an attack or spell becomes a Roll button (one roll covers the attack and, on a hit, its damage). With the game's "rolls: auto" setting the game rolls for you.
-- Clicking a creature only shows what your character could know: allies' HP and AC; enemies as Unhurt or Bloodied, their conditions and how far away they are.
+- Clicking a creature only shows what your character could know: allies' HP and AC; enemies as Unhurt, Wounded or Bloodied, their conditions and how far away they are.
 - Your combat panel is a read-only reference card: movement left, action / bonus action / reaction, weapons, spells and slots, features and their uses.
 - The enemies act on their own turns (the DM rolls behind the screen), and the DM narrates exactly what the dice did.
 - Miss your turn's deadline and the timeout policy applies (the AI plays you cautiously, or you Dodge); players on vacation are played by the AI.
+
+## Travel and the world map
+
+- Travel is typed like any other action: "we take the east road to the next town", "we head north into the hills". When the party agrees, the DM moves you (to a named place, or a direction and distance); if you disagree, the DM lets you settle it first.
+- Clicking the map only shows what your party knows: a town's size, description and shops, a ruin or cave, the terrain, and how far away it is. Unexplored land stays a mystery.
+
+## Your games and characters
+
+- On the Home page the host can **Delete game** (gone for everyone; characters are kept), and players can **Leave game** (their character keeps everything it earned and is free for another game). Spectators can **Stop watching**.
+- In a game, the host can **remove** a player from the party panel. Nobody can leave in the middle of a fight their character is in.
+- A character can be deleted once it isn't in a game.
+
+## Dice
+
+Every d20 a player rolls tumbles across a felt table in the middle of everyone's screen, lands on the real result, then shows the total and Success/Failure (Hit/Miss for attacks). Turn the dice off in Settings.
 
 ## Notifications
 

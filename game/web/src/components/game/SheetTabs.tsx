@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { api } from "../../api/client";
 import { ABILITIES, type CharacterView, type CustomKind, type Item, type Spell } from "../../api/types";
 import { formatMoney, signed } from "../../util/format";
 import { useGame } from "./gameContext";
-import { SpellBadges } from "../LevelUpModal";
+import { SpellBadges } from "../SpellPick";
+import { RulesetContext, RulesText, Term } from "../RulesText";
+import { abilityKey, skillKey } from "../../rules/glossary";
 import Portrait, { PortraitEditor } from "../Portrait";
 import CustomPicker from "../custom/CustomPicker";
 import { KIND_LABEL } from "../custom/MyContentPanel";
@@ -52,14 +54,18 @@ export default function SheetTabs({ viewedId, onViewed }: { viewedId: string | n
       )}
       <div className="sheet-body">
         {tab === "sheet" && c && (
+          <RulesetContext.Provider value={c.ruleset}>
           <CharacterSheet
             c={c}
             onLevelUp={editable && openLevelUp ? () => openLevelUp(c.id) : undefined}
             manage={c.owner_id === view.me.user_id ? run : undefined}
           />
+          </RulesetContext.Provider>
         )}
-        {tab === "inventory" && c && <Inventory c={c} editable={editable} />}
-        {tab === "spells" && c?.spellcasting && <Spells c={c} editable={editable} />}
+        <RulesetContext.Provider value={c?.ruleset}>
+          {tab === "inventory" && c && <Inventory c={c} editable={editable} />}
+          {tab === "spells" && c?.spellcasting && <Spells c={c} editable={editable} />}
+        </RulesetContext.Provider>
         {tab === "quests" && (
           <div className="stack-tight">
             {view.quests.length === 0 && <div className="muted small">No quests yet.</div>}
@@ -115,7 +121,7 @@ function CustomEntries({ c, kinds, manage }: { c: CharacterView; kinds: CustomKi
               </button>
             )}
           </summary>
-          <div className="small pre">{x.description}</div>
+          <div className="small pre"><RulesText text={x.description} /></div>
         </details>
       ))}
     </>
@@ -193,7 +199,7 @@ export function CharacterSheet({
       <div className="ability-grid">
         {ABILITIES.map((k) => (
           <div key={k} className={`ability-cell ${c.save_profs.includes(k) ? "prof" : ""}`} title={`Save ${signed(c.saves[k])}`}>
-            <div className="ab-name">{k}</div>
+            <div className="ab-name"><Term k={abilityKey(k)}>{k}</Term></div>
             <div className="ab-score">{c.abilities[k]}</div>
             <div className="ab-mod">{signed(c.mods[k])}</div>
             <div className="ab-save small">save {signed(c.saves[k])}</div>
@@ -204,7 +210,9 @@ export function CharacterSheet({
       <div className="skill-list">
         {Object.entries(c.skills).map(([name, v]) => (
           <div key={name} className={`skill ${c.skill_profs.includes(name) ? "prof" : ""}`}>
-            <span>{c.skill_profs.includes(name) ? "●" : "○"} {name}</span>
+            <span>
+              {c.skill_profs.includes(name) ? "●" : "○"} <Term k={skillKey(name)}>{name}</Term>
+            </span>
             <span>{signed(v)}</span>
           </div>
         ))}
@@ -235,7 +243,7 @@ export function CharacterSheet({
               <summary>
                 {m.name} <span className="badge tiny mastery">{m.mastery}</span>
               </summary>
-              <div className="small">{m.description || MASTERY_TEXT[m.mastery] || ""}</div>
+              <div className="small"><RulesText text={m.description || MASTERY_TEXT[m.mastery] || ""} /></div>
             </details>
           ))}
         </>
@@ -246,7 +254,7 @@ export function CharacterSheet({
           {(c.feats ?? []).map((f) => (
             <details key={f.name} className="feature">
               <summary>{f.name}</summary>
-              <div className="small">{f.description}</div>
+              <div className="small pre"><RulesText text={f.description} /></div>
             </details>
           ))}
           <CustomEntries c={c} kinds={["feat"]} manage={manage} />
@@ -273,7 +281,7 @@ export function CharacterSheet({
                   </span>
                 )}
               </summary>
-              <div className="small">{a.description}</div>
+              <div className="small pre"><RulesText text={a.description} /></div>
             </details>
           ))}
         </>
@@ -290,7 +298,7 @@ export function CharacterSheet({
               </span>
             )}
           </summary>
-          <div className="small">{f.description}</div>
+          <div className="small pre"><RulesText text={f.description} /></div>
         </details>
       ))}
       <CustomEntries c={c} kinds={["feature", "background", "species_trait"]} manage={manage} />
@@ -370,7 +378,7 @@ function Inventory({ c, editable }: { c: CharacterView; editable: boolean }) {
               {it.properties.length > 0 && ` · ${it.properties.join(", ")}`}
               {it.value_cp > 0 && ` · ${formatMoney(it.value_cp)}`}
             </div>
-            {it.description && <div className="small clamp">{it.description}</div>}
+            {it.description && <ItemDescription text={it.description} />}
           </div>
           {editable && (
             <div className="inv-actions">
@@ -552,8 +560,34 @@ export function SpellCard({ s }: { s: Spell }) {
       </summary>
       <div className="small">
         {s.casting_time && <div className="muted">Casting time: {s.casting_time}</div>}
-        {s.description}
+        <div className="pre">
+          <RulesText text={s.description} />
+        </div>
       </div>
     </details>
+  );
+}
+
+/** An item's description: two lines, with the rest a click away. */
+export function ItemDescription({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const [long, setLong] = useState(text.length > 140 || text.includes("\n"));
+  const ref = useRef<HTMLDivElement>(null);
+  // Offer "More" whenever the two-line preview actually cuts the text off (narrow panels cut short text too).
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el && !open) setLong(el.scrollHeight > el.clientHeight + 1);
+  }, [text, open]);
+  return (
+    <div className="small">
+      <div ref={ref} className={open ? "pre" : "clamp"}>
+        <RulesText text={text} />
+      </div>
+      {long && (
+        <button type="button" className="link-btn small" onClick={() => setOpen(!open)}>
+          {open ? "Less ▴" : "More ▾"}
+        </button>
+      )}
+    </div>
   );
 }

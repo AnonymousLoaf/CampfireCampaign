@@ -36,6 +36,26 @@ export function neighbors(q: number, r: number): [number, number][] {
       ];
 }
 
+/** Steps between two hexes (odd-r offset → cube distance). */
+export function hexDistance(a: [number, number], b: [number, number]): number {
+  const cube = ([q, r]: [number, number]) => {
+    const x = q - (r - (r & 1)) / 2;
+    return [x, -x - r, r];
+  };
+  const [ax, ay, az] = cube(a);
+  const [bx, by, bz] = cube(b);
+  return Math.max(Math.abs(ax - bx), Math.abs(ay - by), Math.abs(az - bz));
+}
+
+/** Rough compass direction from one hex to another ("north-east"). */
+export function compass(from: [number, number], to: [number, number]): string {
+  const [x1, y1] = hexCenter(from[0], from[1], 1);
+  const [x2, y2] = hexCenter(to[0], to[1], 1);
+  const deg = (Math.atan2(x2 - x1, -(y2 - y1)) * 180) / Math.PI;
+  const names = ["north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west"];
+  return names[((Math.round(deg / 45) % 8) + 8) % 8];
+}
+
 /** World-space point → nearest hex (q, r). */
 export function pixelToHex(x: number, y: number, size: number): [number, number] {
   const rApprox = Math.round(y / (size * 1.5));

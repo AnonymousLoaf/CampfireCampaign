@@ -136,10 +136,13 @@ export const api = {
   },
   seen: (id: string, log_id: number | string) => post<Ok>(`/games/${id}/seen`, { log_id }),
   recap: (id: string) => post<{ text: string }>(`/games/${id}/recap`),
+  storySummary: (id: string) => post<{ text: string; updated_at: string | null; upto_id: number }>(`/games/${id}/story`),
   view: (id: string, character_id?: string | null) =>
     get<GameView>(`/games/${id}/view` + (character_id ? `?character_id=${encodeURIComponent(character_id)}` : "")),
   start: (id: string) => post<Ok>(`/games/${id}/start`),
   leave: (id: string) => post<Ok>(`/games/${id}/leave`),
+  deleteGame: (id: string) => del<Ok>(`/games/${id}`),
+  removePlayer: (id: string, user_id: string) => post<Ok>(`/games/${id}/remove-player`, { user_id }),
   patchSettings: (id: string, s: SettingsPatch) => patch<Ok>(`/games/${id}/settings`, s),
   tvLink: (id: string) => post<{ tv_token: string; url: string }>(`/games/${id}/tv-link`),
   tvView: (token: string) => get<GameView>(`/tv/${encodeURIComponent(token)}/view`),

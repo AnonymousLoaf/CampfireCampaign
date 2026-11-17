@@ -3,6 +3,8 @@ import { ABILITIES, type Ability, type CharacterView, type LevelUpBody, type Spe
 import Modal from "./Modal";
 import ErrorText from "./ErrorText";
 import { signed } from "../util/format";
+import { SpellBadges, SpellPicker } from "./SpellPick";
+import { RulesetContext, RulesText } from "./RulesText";
 
 /**
  * Level-up wizard for one character's `pending_level_up` offer.
@@ -120,6 +122,7 @@ export default function LevelUpModal({
   }
 
   return (
+    <RulesetContext.Provider value={character.ruleset}>
     <Modal
       title={`Level up: ${character.name} → level ${offer.to_level}`}
       onClose={onClose}
@@ -155,7 +158,7 @@ export default function LevelUpModal({
             <h3>New at level {offer.to_level}</h3>
             {offer.features.map((f) => (
               <div key={f.name} className="feature">
-                <strong>{f.name}.</strong> <span className="small">{f.description}</span>
+                <strong>{f.name}.</strong> <span className="small"><RulesText text={f.description} /></span>
               </div>
             ))}
           </section>
@@ -177,7 +180,7 @@ export default function LevelUpModal({
                 {featOptions.map((f) => (
                   <button key={f.name} className={`choice ${feat === f.name ? "selected" : ""}`} onClick={() => setFeat(f.name)}>
                     <strong>{f.name}</strong>
-                    <span className="small">{f.description}</span>
+                    <span className="small"><RulesText text={f.description} /></span>
                   </button>
                 ))}
               </div>
@@ -229,7 +232,7 @@ export default function LevelUpModal({
                 return (
                   <button key={id} className={`choice ${subclass === id ? "selected" : ""}`} onClick={() => setSubclass(id)}>
                     <strong>{s.name}</strong>
-                    <span className="small">{s.description}</span>
+                    <span className="small"><RulesText text={s.description} /></span>
                   </button>
                 );
               })}
@@ -244,7 +247,7 @@ export default function LevelUpModal({
               {offer.fighting_style_options.map((s) => (
                 <button key={s.name} className={`choice ${style === s.name ? "selected" : ""}`} onClick={() => setStyle(s.name)}>
                   <strong>{s.name}</strong>
-                  <span className="small">{s.description}</span>
+                  <span className="small"><RulesText text={s.description} /></span>
                 </button>
               ))}
             </div>
@@ -317,47 +320,16 @@ export default function LevelUpModal({
         <ErrorText error={err} />
       </div>
     </Modal>
+    </RulesetContext.Provider>
   );
 }
 
 function SpellChoices({ list, chosen, max, onToggle }: { list: Spell[]; chosen: string[]; max: number; onToggle: (i: string) => void }) {
   if (!list.length) return <p className="muted small">No new options available.</p>;
-  return (
-    <div className="spell-pick-grid">
-      {list.map((s) => {
-        const picked = chosen.includes(s.index);
-        return (
-          <button key={s.index} className={`spell-card pick ${picked ? "selected" : ""}`} disabled={!picked && chosen.length >= max} onClick={() => onToggle(s.index)}>
-            <div className="spell-head">
-              <strong>{s.name}</strong>
-              <span className={`kind kind-${s.kind}`}>{s.kind}</span>
-            </div>
-            <div className="muted small">
-              {s.level === 0 ? "cantrip" : `level ${s.level}`} · {s.school}
-              {s.range_ft ? ` · ${s.range_ft} ft` : ""}
-              <SpellBadges s={s} />
-            </div>
-            <div className="small clamp">{s.description}</div>
-          </button>
-        );
-      })}
-    </div>
-  );
+  return <SpellPicker list={list} chosen={chosen} max={max} onToggle={onToggle} />;
 }
 
-export function SpellBadges({ s }: { s: Spell }) {
-  return (
-    <>
-      {s.concentration && <span className="badge tiny" title="Concentration">C</span>}
-      {s.ritual && <span className="badge tiny" title="Ritual">R</span>}
-      {s.area && (
-        <span className="badge tiny" title="Area of effect">
-          {s.area.size_ft} ft {s.area.shape}
-        </span>
-      )}
-    </>
-  );
-}
+export { SpellBadges };
 
 /** A small "Level up!" button for any character with a pending offer. */
 export function LevelUpBadge({ character, onClick }: { character: CharacterView; onClick: () => void }) {

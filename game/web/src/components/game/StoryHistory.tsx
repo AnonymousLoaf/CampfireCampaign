@@ -11,8 +11,73 @@ function dayKey(ts: string): string {
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
 }
 
-/** The whole story so far — narration and events, oldest at the top, with "Load older" paging. */
+/**
+ * The story so far: a summary the DM keeps up to date (rewritten when there's new narration),
+ * with the full word-for-word log one click away.
+ */
 export default function StoryHistory() {
+  const { gameId, view } = useGame();
+  const [summary, setSummary] = useState<{ text: string; updated_at: string | null; upto_id: number } | null>(null);
+  const [writing, setWriting] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [showLog, setShowLog] = useState(false);
+
+  const refresh = useCallback(async () => {
+    setWriting(true);
+    setErr(null);
+    try {
+      setSummary(await api.storySummary(gameId));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setWriting(false);
+    }
+  }, [gameId]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  // New narration since the summary was written → offer to bring it up to date.
+  const newestNarration = [...view.log].reverse().find((l) => l.kind === "narration");
+  const behind = !!summary && !!newestNarration && Number(newestNarration.id) > summary.upto_id;
+  const paragraphs = (summary?.text ?? "").split(/\n\s*\n/).filter((p) => p.trim());
+
+  return (
+    <div className="story-history">
+      <section className="story-summary">
+        <div className="row-between">
+          <h3>The story so far</h3>
+          {behind && !writing && (
+            <button className="btn tiny" onClick={() => void refresh()}>
+              Bring it up to date
+            </button>
+          )}
+        </div>
+        {writing && !summary?.text && <div className="muted small">The DM is writing up the story so far…</div>}
+        {err && <div className="error-text small">{err}</div>}
+        {!writing && !err && summary && !summary.text && <div className="muted">The story hasn't begun yet.</div>}
+        {paragraphs.map((p, i) => (
+          <p key={i}>{p}</p>
+        ))}
+        {summary?.updated_at && (
+          <div className="muted tiny-text">
+            {writing ? "Updating with the latest events…" : `Written by the DM · ${new Date(summary.updated_at).toLocaleString()}`}
+          </div>
+        )}
+      </section>
+      <div className="center-text">
+        <button className="btn ghost small" onClick={() => setShowLog(!showLog)}>
+          {showLog ? "Hide the full story log" : "Read the full story log"}
+        </button>
+      </div>
+      {showLog && <FullLog />}
+    </div>
+  );
+}
+
+/** Every narration and event, oldest at the top, with "Load older" paging. */
+function FullLog() {
   const { gameId, view } = useGame();
   const [entries, setEntries] = useState<LogEntry[]>([]); // newest first, as the server returns them
   const [hasMore, setHasMore] = useState(false);
@@ -50,7 +115,7 @@ export default function StoryHistory() {
   const oldestFirst = [...entries].reverse();
   let lastDay = "";
   return (
-    <div className="story-history">
+    <div className="story-full-log">
       {hasMore && (
         <div className="center-text">
           <button className="btn small" disabled={loading} onClick={() => void load(entries[entries.length - 1]?.id)}>
@@ -59,7 +124,6 @@ export default function StoryHistory() {
         </div>
       )}
       {err && entries.length === 0 && <div className="error-text small">{err}</div>}
-      {!loading && entries.length === 0 && !err && <div className="muted center-text">The story hasn't begun yet.</div>}
       {oldestFirst.map((e) => {
         const d = dayKey(e.ts);
         const header = d && d !== lastDay ? d : null;

@@ -8,11 +8,14 @@ import CustomPicker from "../custom/CustomPicker";
 export default function CharacterCard({
   c,
   onDelete,
+  onLeaveGame,
   onLevelUp,
   onChanged,
 }: {
   c: CharacterView;
   onDelete?: () => void;
+  /** The character is in someone else's game: take it out (the character keeps its progress). */
+  onLeaveGame?: () => void;
   onLevelUp?: () => void;
   /** When set, the card offers portrait upload/remove and custom content (my own characters in the lobby). */
   onChanged?: () => void;
@@ -69,10 +72,19 @@ export default function CharacterCard({
         </div>
         {onChanged && <CustomPicker c={c} run={run} showAttached />}
       </div>
-      {onDelete && (
-        <button className="icon-btn danger" title="Delete character" onClick={onDelete}>
-          🗑
-        </button>
+      {(onDelete || onLeaveGame) && (
+        <div className="char-card-actions">
+          {onDelete && (
+            <button className="icon-btn danger" title="Delete character" onClick={onDelete}>
+              🗑
+            </button>
+          )}
+          {onLeaveGame && (
+            <button className="btn ghost small" title={`Take ${c.name} out of their campaign`} onClick={onLeaveGame}>
+              Leave game
+            </button>
+          )}
+        </div>
       )}
     </div>
   );

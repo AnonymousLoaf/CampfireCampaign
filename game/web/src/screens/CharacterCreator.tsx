@@ -7,10 +7,12 @@ import {
   type AbilityRoll,
   type CreatorOptions,
   type Ruleset,
-  type Spell,
 } from "../api/types";
 import ErrorText, { useAction } from "../components/ErrorText";
 import { abilityMod, formatMoney, signed } from "../util/format";
+import { SpellPicker } from "../components/SpellPick";
+import { RulesetContext, RulesText, Term } from "../components/RulesText";
+import { abilityKey, skillKey } from "../rules/glossary";
 
 const STEPS = ["Race", "Class", "Background", "Abilities", "Skills", "Equipment", "Spells", "Details", "Review"] as const;
 type Step = (typeof STEPS)[number];
@@ -290,6 +292,7 @@ export default function CharacterCreator({ onDone, onCancel }: { onDone: () => v
   };
 
   return (
+    <RulesetContext.Provider value={ruleset}>
     <div className="creator">
       <header className="topbar">
         <div className="brand-inline">
@@ -418,7 +421,9 @@ export default function CharacterCreator({ onDone, onCancel }: { onDone: () => v
               {raceObj && (
                 <div className="detail-box">
                   <strong>{raceObj.name}</strong> · {raceObj.size} · Languages: {raceObj.languages.join(", ")}
-                  <div className="small">Traits: {raceObj.traits.join(", ")}</div>
+                  <div className="small">
+                    Traits: <RulesText text={raceObj.traits.join(", ")} />
+                  </div>
                 </div>
               )}
             </div>
@@ -450,7 +455,7 @@ export default function CharacterCreator({ onDone, onCancel }: { onDone: () => v
                       d{c.hit_die} hit die · Saves {c.saves.join(", ")}
                       {c.spellcasting ? ` · Casts with ${c.spellcasting.ability}` : ""}
                     </span>
-                    <span className="small">{c.description}</span>
+                    <span className="small"><RulesText text={c.description} /></span>
                   </button>
                 ))}
               </div>
@@ -462,7 +467,7 @@ export default function CharacterCreator({ onDone, onCancel }: { onDone: () => v
                   <h4>Level 1 features</h4>
                   {clsObj.features.map((f) => (
                     <div key={f.name} className="feature">
-                      <strong>{f.name}.</strong> <span className="small">{f.description}</span>
+                      <strong>{f.name}.</strong> <span className="small"><RulesText text={f.description} /></span>
                     </div>
                   ))}
                   {clsObj.subclasses && clsObj.subclasses.length > 0 && clsObj.subclass_level !== 1 && (
@@ -481,7 +486,7 @@ export default function CharacterCreator({ onDone, onCancel }: { onDone: () => v
                       return (
                         <button key={id} className={`choice ${subclass === id ? "selected" : ""}`} onClick={() => setSubclass(id)}>
                           <strong>{s.name}</strong>
-                          <span className="small">{s.description}</span>
+                          <span className="small"><RulesText text={s.description} /></span>
                         </button>
                       );
                     })}
@@ -495,7 +500,7 @@ export default function CharacterCreator({ onDone, onCancel }: { onDone: () => v
                     {styles.map((s) => (
                       <button key={s.name} className={`choice ${fightingStyle === s.name ? "selected" : ""}`} onClick={() => setFightingStyle(s.name)}>
                         <strong>{s.name}</strong>
-                        <span className="small">{s.description}</span>
+                        <span className="small"><RulesText text={s.description} /></span>
                       </button>
                     ))}
                   </div>
@@ -525,7 +530,7 @@ export default function CharacterCreator({ onDone, onCancel }: { onDone: () => v
                       {is2024 && b.ability_options?.length ? ` · ${b.ability_options.join(", ")}` : ""}
                     </span>
                     {is2024 && b.origin_feat && <span className="small">Origin feat: {b.origin_feat.name}</span>}
-                    <span className="small">{b.description}</span>
+                    <span className="small"><RulesText text={b.description} /></span>
                   </button>
                 ))}
               </div>
@@ -566,7 +571,7 @@ export default function CharacterCreator({ onDone, onCancel }: { onDone: () => v
               )}
               {is2024 && bgObj?.origin_feat && (
                 <div className="detail-box">
-                  <strong>Origin feat: {bgObj.origin_feat.name}.</strong> <span className="small">{bgObj.origin_feat.description}</span>
+                  <strong>Origin feat: {bgObj.origin_feat.name}.</strong> <span className="small"><RulesText text={bgObj.origin_feat.description} /></span>
                   {bgObj.tool && <div className="small muted">Tool proficiency: {bgObj.tool}</div>}
                 </div>
               )}
@@ -632,7 +637,7 @@ export default function CharacterCreator({ onDone, onCancel }: { onDone: () => v
                         const total = v + bonus;
                         return (
                           <tr key={k}>
-                            <th>{k}</th>
+                            <th><Term k={abilityKey(k)}>{k}</Term></th>
                             <td>
                               <button className="btn small" disabled={v <= opts.point_buy.min} onClick={() => setPointBuy({ ...pointBuy, [k]: v - 1 })}>
                                 −
@@ -722,7 +727,7 @@ export default function CharacterCreator({ onDone, onCancel }: { onDone: () => v
                       onClick={() => toggle(skills, setSkills, sk, clsObj.skill_choices.count)}
                       title={fromBg ? "From your background" : allowed ? "" : "Not on your class list"}
                     >
-                      {sk} <span className="muted small">{opts.skills[sk]}</span>
+                      <Term k={skillKey(sk)}>{sk}</Term> <span className="muted small">{opts.skills[sk]}</span>
                       {fromBg && <span className="small"> ✓ background</span>}
                     </button>
                   );
@@ -918,7 +923,7 @@ export default function CharacterCreator({ onDone, onCancel }: { onDone: () => v
           <div className="ability-grid">
             {ABILITIES.map((k) => (
               <div key={k} className="ability-cell">
-                <div className="ab-name">{k}</div>
+                <div className="ab-name"><Term k={abilityKey(k)}>{k}</Term></div>
                 <div className="ab-score">{finalScores ? finalScores[k] : "–"}</div>
                 <div className="ab-mod">{finalScores ? signed(abilityMod(finalScores[k])) : ""}</div>
               </div>
@@ -962,6 +967,7 @@ export default function CharacterCreator({ onDone, onCancel }: { onDone: () => v
         )}
       </footer>
     </div>
+    </RulesetContext.Provider>
   );
 }
 
@@ -1017,7 +1023,7 @@ function AssignTable({
             const b = bonus(k);
             return (
               <tr key={k}>
-                <th>{k}</th>
+                <th><Term k={abilityKey(k)}>{k}</Term></th>
                 <td>
                   <select value={i === null ? "" : String(i)} onChange={(e) => setSlot(k, e.target.value === "" ? null : Number(e.target.value))}>
                     <option value="">—</option>
@@ -1036,30 +1042,6 @@ function AssignTable({
           })}
         </tbody>
       </table>
-    </div>
-  );
-}
-
-function SpellPicker({ list, chosen, max, onToggle }: { list: Spell[]; chosen: string[]; max: number; onToggle: (i: string) => void }) {
-  return (
-    <div className="spell-pick-grid">
-      {list.map((s) => {
-        const picked = chosen.includes(s.index);
-        return (
-          <button key={s.index} className={`spell-card pick ${picked ? "selected" : ""}`} disabled={!picked && chosen.length >= max} onClick={() => onToggle(s.index)}>
-            <div className="spell-head">
-              <strong>{s.name}</strong>
-              <span className={`kind kind-${s.kind}`}>{s.kind}</span>
-            </div>
-            <div className="muted small">
-              {s.school}
-              {s.range_ft ? ` · ${s.range_ft} ft` : ""}
-              {s.combat ? " · combat" : ""}
-            </div>
-            <div className="small clamp">{s.description}</div>
-          </button>
-        );
-      })}
     </div>
   );
 }

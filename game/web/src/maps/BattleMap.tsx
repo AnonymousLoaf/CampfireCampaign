@@ -71,7 +71,7 @@ function TokenCard({ token, from, x, y, isActor, onClose }: { token: Token; from
   );
 }
 
-const WOUNDS: Record<string, string> = { healthy: "Unhurt", bloodied: "Bloodied", dead: "Dead", down: "Down" };
+const WOUNDS: Record<string, string> = { healthy: "Unhurt", hurt: "Wounded", bloodied: "Bloodied", dead: "Dead", down: "Down" };
 
 export default function BattleMap({
   encounter,

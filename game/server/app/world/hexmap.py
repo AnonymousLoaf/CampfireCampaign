@@ -280,6 +280,44 @@ def poi_at(world: dict, q: int, r: int) -> dict | None:
     return next((p for p in world["pois"] if p["q"] == q and p["r"] == r), None)
 
 
+DIRECTIONS = {"n": (0, -1), "ne": (0.7071, -0.7071), "e": (1, 0), "se": (0.7071, 0.7071), "s": (0, 1),
+              "sw": (-0.7071, 0.7071), "w": (-1, 0), "nw": (-0.7071, -0.7071)}
+_DIR_WORDS = {"north": "n", "northeast": "ne", "north-east": "ne", "east": "e", "southeast": "se", "south-east": "se",
+              "south": "s", "southwest": "sw", "south-west": "sw", "west": "w", "northwest": "nw", "north-west": "nw"}
+
+
+def _pixel(q: int, r: int) -> tuple[float, float]:
+    return math.sqrt(3) * (q + 0.5 * (r & 1)), 1.5 * r
+
+
+def _from_pixel(x: float, y: float) -> tuple[int, int]:
+    r = round(y / 1.5)
+    q = round(x / math.sqrt(3) - 0.5 * (r & 1))
+    return q, r
+
+
+def hex_toward(world: dict, direction: str, hexes: int) -> tuple[int, int] | None:
+    """The hex about `hexes` steps from the party in a compass direction ("n", "northeast", ...), pulled back toward
+    the party until it lands on reachable ground. None if the direction is unknown or there is nowhere to go."""
+    d = direction.strip().lower().replace(" ", "")
+    d = _DIR_WORDS.get(d, d)
+    if d not in DIRECTIONS:
+        return None
+    dx, dy = DIRECTIONS[d]
+    start = (world["party"]["q"], world["party"]["r"])
+    sx, sy = _pixel(*start)
+    rows = [list(r) for r in world["hexes"]]
+    roads = {tuple(c) for c in world.get("roads", [])}
+    for n in range(max(1, hexes), 0, -1):
+        q, r = _from_pixel(sx + dx * n * math.sqrt(3), sy + dy * n * math.sqrt(3))
+        q, r = min(max(q, 0), world["w"] - 1), min(max(r, 0), world["h"] - 1)
+        if (q, r) == start or BIOME_COST.get(rows[r][q]) is None:
+            continue
+        if find_path(rows, start, (q, r), roads):
+            return q, r
+    return None
+
+
 def plan_travel(world: dict, dest: tuple[int, int]) -> dict:
     rows = [list(r) for r in world["hexes"]]
     start = (world["party"]["q"], world["party"]["r"])
@@ -311,7 +349,8 @@ def view(world: dict) -> dict:
         "w": world["w"], "h": world["h"], "hexes": world["hexes"], "revealed": revealed_rows,
         "settlements": [{k: s[k] for k in ("id", "name", "q", "r", "size", "shops", "description")}
                         for s in world["settlements"] if (s["q"], s["r"]) in seen or s.get("known")],
-        "pois": [{k: p[k] for k in ("id", "name", "kind", "q", "r")} for p in world["pois"] if (p["q"], p["r"]) in seen],
+        "pois": [{k: p.get(k, "") for k in ("id", "name", "kind", "q", "r", "description")}
+                 for p in world["pois"] if (p["q"], p["r"]) in seen],
         "roads": world.get("roads", []),
         "party": world["party"],
     }

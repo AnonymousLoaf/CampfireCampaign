@@ -1,23 +1,30 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { TravelTo, World } from "../api/types";
-import { BIOME_COLORS, BIOME_NAMES, hexCenter, hexCorners, neighbors, pixelToHex } from "./hex";
+import type { World } from "../api/types";
+import { BIOME_COLORS, BIOME_NAMES, compass, hexCenter, hexCorners, hexDistance, neighbors, pixelToHex } from "./hex";
 import { getCtx, useCanvasSize } from "./useCanvas";
 
 type View = { x: number; y: number; scale: number }; // world-space point at canvas origin, zoom
 
 const BASE = 18; // hex radius at scale 1
+const MILES_PER_HEX = 6;
+const SHOP_LABEL: Record<string, string> = {
+  general: "General store",
+  blacksmith: "Blacksmith",
+  alchemist: "Alchemist",
+  magic: "Magic shop",
+  inn: "Inn",
+  temple: "Temple",
+};
+const POI_LABEL: Record<string, string> = { ruins: "Ruins", cave: "Cave", tower: "Tower", camp: "Camp", shrine: "Shrine" };
 
+/** The world map. Clicking a hex only shows what the party knows about it — travel is typed, and the DM moves the party. */
 export default function WorldMap({
   world,
-  destination,
-  onPick,
   locationName,
   interactive = true,
   autoFit = false,
 }: {
   world: World;
-  destination?: TravelTo;
-  onPick?: (t: TravelTo, label: string) => void;
   locationName?: string;
   interactive?: boolean;
   autoFit?: boolean;
@@ -25,6 +32,7 @@ export default function WorldMap({
   const { wrapRef, canvasRef, size } = useCanvasSize();
   const [view, setView] = useState<View | null>(null);
   const [hover, setHover] = useState<{ q: number; r: number } | null>(null);
+  const [selected, setSelected] = useState<{ q: number; r: number } | null>(null);
   const drag = useRef<{ sx: number; sy: number; vx: number; vy: number; moved: boolean } | null>(null);
 
   const revealed = useCallback((q: number, r: number) => world.revealed[r]?.[q] === "1", [world]);
@@ -124,28 +132,15 @@ export default function WorldMap({
       label(ctx, st.name, cx, cy + s * 1.05, Math.max(10, s * (st.size === "city" ? 0.66 : 0.56)), "#fff3d6");
     }
 
-    // Destination ring.
-    const dest = destinationHex(world, destination);
-    if (dest) {
-      const [cx, cy] = hexCenter(dest[0], dest[1], s);
+    // Selected hex (the one whose info card is open).
+    if (selected && interactive) {
+      const [cx, cy] = hexCenter(selected.q, selected.r, s);
       ctx.strokeStyle = "#ffd36b";
       ctx.lineWidth = 3;
-      ctx.setLineDash([5, 4]);
       ctx.beginPath();
       hexCorners(cx, cy, s * 0.92).forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
       ctx.closePath();
       ctx.stroke();
-      ctx.setLineDash([]);
-      // dotted line from party
-      const [px, py] = hexCenter(world.party.q, world.party.r, s);
-      ctx.strokeStyle = "rgba(255, 211, 107, 0.6)";
-      ctx.lineWidth = 2;
-      ctx.setLineDash([3, 6]);
-      ctx.beginPath();
-      ctx.moveTo(px, py);
-      ctx.lineTo(cx, cy);
-      ctx.stroke();
-      ctx.setLineDash([]);
     }
 
     // Hover outline.
@@ -186,7 +181,7 @@ export default function WorldMap({
     }
 
     ctx.restore();
-  }, [world, view, size, hover, destination, interactive, revealed, canvasRef]);
+  }, [world, view, size, hover, selected, interactive, revealed, canvasRef]);
 
   const toWorld = (clientX: number, clientY: number) => {
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -260,18 +255,11 @@ export default function WorldMap({
   const fromTouch = () => Date.now() - lastTouch.current < 700;
 
   const pickAt = (clientX: number, clientY: number) => {
-    if (!view || !interactive || !onPick) return;
+    if (!view || !interactive) return;
     const p = toWorld(clientX, clientY);
     const [q, r] = pixelToHex(p.x, p.y, BASE * view.scale);
-    if (q < 0 || r < 0 || q >= world.w || r >= world.h) return;
-    if (q === world.party.q && r === world.party.r) return;
-    const st = world.settlements.find((x) => x.q === q && x.r === r && revealed(q, r));
-    if (st) onPick({ settlement_id: st.id }, st.name);
-    else {
-      const poi = world.pois.find((x) => x.q === q && x.r === r);
-      const biome = BIOME_NAMES[world.hexes[r]?.[q] ?? ""] ?? "Unknown";
-      onPick({ q, r }, poi ? poi.name : revealed(q, r) ? `${biome} (${q}, ${r})` : `Unexplored (${q}, ${r})`);
-    }
+    if (q < 0 || r < 0 || q >= world.w || r >= world.h) return setSelected(null);
+    setSelected((cur) => (cur && cur.q === q && cur.r === r ? null : { q, r }));
   };
 
   const onMouseDown = (e: React.MouseEvent) => {
@@ -317,13 +305,15 @@ export default function WorldMap({
 
   const hoverInfo = (() => {
     if (!hover) return null;
-    if (!revealed(hover.q, hover.r)) return "Unexplored";
     const st = world.settlements.find((x) => x.q === hover.q && x.r === hover.r);
-    if (st) return `${st.name} — ${st.size}${st.shops.length ? ` · shops: ${st.shops.join(", ")}` : ""}`;
+    if (st) return st.name;
+    if (!revealed(hover.q, hover.r)) return "Unexplored";
     const poi = world.pois.find((x) => x.q === hover.q && x.r === hover.r);
-    if (poi) return `${poi.name} (${poi.kind})`;
+    if (poi) return poi.name;
     return BIOME_NAMES[world.hexes[hover.r]?.[hover.q] ?? ""] ?? "";
   })();
+
+  const card = selected ? hexInfo(world, selected.q, selected.r, revealed(selected.q, selected.r)) : null;
 
   return (
     <div className="map-wrap" ref={wrapRef}>
@@ -345,8 +335,36 @@ export default function WorldMap({
       />
       <div className="map-overlay top-left">
         {locationName && <span className="map-chip">📍 {locationName}</span>}
-        {hoverInfo && interactive && <span className="map-chip muted">{hoverInfo}</span>}
+        {hoverInfo && interactive && !card && <span className="map-chip muted">{hoverInfo}</span>}
       </div>
+      {card && interactive && (
+        <div className="map-card place-card" role="dialog" aria-label={card.title}>
+          <div className="place-card-head">
+            <div>
+              <div className="place-card-title">{card.title}</div>
+              {card.subtitle && <div className="muted small">{card.subtitle}</div>}
+            </div>
+            <button className="icon-btn tiny" aria-label="Close" onClick={() => setSelected(null)}>
+              ✕
+            </button>
+          </div>
+          {card.description && <p className="place-card-desc">{card.description}</p>}
+          {card.shops.length > 0 && (
+            <div className="place-card-shops">
+              {card.shops.map((s) => (
+                <span key={s} className="chip static">
+                  {SHOP_LABEL[s] ?? s}
+                </span>
+              ))}
+            </div>
+          )}
+          {card.facts.map((f) => (
+            <div key={f} className="small muted">
+              {f}
+            </div>
+          ))}
+        </div>
+      )}
       {interactive && (
         <div className="map-overlay bottom-right">
           <button className="icon-btn" title="Zoom in" onClick={() => view && setView({ ...view, scale: Math.min(4, view.scale * 1.25) })}>
@@ -372,13 +390,37 @@ export default function WorldMap({
   );
 }
 
-function destinationHex(world: World, d: TravelTo | undefined): [number, number] | null {
-  if (!d) return null;
-  if ("settlement_id" in d) {
-    const st = world.settlements.find((s) => s.id === d.settlement_id);
-    return st ? [st.q, st.r] : null;
+/** What the party knows about one hex — only what the map has revealed (and settlements they've heard of). */
+function hexInfo(world: World, q: number, r: number, seen: boolean) {
+  const here = q === world.party.q && r === world.party.r;
+  const steps = hexDistance([world.party.q, world.party.r], [q, r]);
+  const where = here
+    ? "📍 The party is here."
+    : `About ${steps * MILES_PER_HEX} miles ${compass([world.party.q, world.party.r], [q, r])} of the party (as the crow flies).`;
+  const onRoad = world.roads.some(([x, y]) => x === q && y === r);
+  const biome = BIOME_NAMES[world.hexes[r]?.[q] ?? ""] ?? "Unknown land";
+  const st = world.settlements.find((x) => x.q === q && x.r === r);
+  if (st) {
+    const size = st.size[0].toUpperCase() + st.size.slice(1);
+    return {
+      title: st.name,
+      subtitle: seen ? `${size} · ${biome.toLowerCase()}` : `${size} · heard of, not yet seen`,
+      description: st.description,
+      shops: st.shops,
+      facts: [where, ...(onRoad ? ["A road runs through it."] : [])],
+    };
   }
-  return [d.q, d.r];
+  if (!seen) {
+    return { title: "Unexplored", subtitle: "", description: "", shops: [] as string[], facts: ["Nobody in the party knows what's out here.", where] };
+  }
+  const poi = world.pois.find((x) => x.q === q && x.r === r);
+  return {
+    title: poi ? poi.name : biome,
+    subtitle: poi ? `${POI_LABEL[poi.kind] ?? poi.kind} · ${biome.toLowerCase()}` : onRoad ? "On the road" : "",
+    description: poi?.description ?? "",
+    shops: [] as string[],
+    facts: [where, ...(poi && onRoad ? ["Near the road."] : [])],
+  };
 }
 
 function label(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, px: number, color: string) {

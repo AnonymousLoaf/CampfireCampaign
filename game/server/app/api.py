@@ -1,8 +1,10 @@
 """HTTP + WebSocket API (see docs/game/API.md)."""
 from __future__ import annotations
 
+import asyncio
 import json
 import secrets
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 import re
@@ -12,7 +14,7 @@ from fastapi import (APIRouter, Cookie, Depends, File, HTTPException, Request, R
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
 from . import ddb
@@ -24,8 +26,8 @@ from .game import notify
 from .game.notify import nudge as send_nudge
 from .game.state import LIVE_EDITABLE, Ctx, build_view, clean_settings, load, lock_for
 from .config import DATA_DIR
-from .models import (AbilityRoll, Character, CustomEntry, Game, LogEntry, Membership, PushSubscription, SessionToken,
-                     User)
+from .models import (AbilityRoll, Character, CustomEntry, DMCall, Game, LogEntry, Membership, PushSubscription,
+                     SessionToken, User)
 from .rules import character as ch
 from .rules import dice, srd
 from .rules import shop as shop_rules
@@ -674,20 +676,83 @@ async def start(gid: str, u: User = Depends(current_user)):
     return await mutate(gid, u, lambda ctx: flow.start_game(ctx, u.id))
 
 
+def _remove_member(ctx: Ctx, m: Membership) -> dict:
+    """Take a player (and their character) out of a game. The character keeps everything it earned and is free for
+    another game. Not in the middle of a fight the character is part of."""
+    if m.user_id == ctx.game.host_id:
+        raise RulesError("the host can't leave their own game — delete it instead")
+    enc = ctx.encounter
+    if m.character_id and enc and any(t.get("character_id") == m.character_id for t in enc.get("tokens", [])):
+        raise RulesError("not in the middle of a fight — try again once it's over")
+    name = ctx.chars.get(m.character_id or "", {}).get("name") or ctx.user_name(m.user_id)
+    p = ctx.phase
+    p.get("submissions", {}).pop(m.user_id, None)
+    if m.user_id in p.get("ready", []):
+        p["ready"] = [x for x in p["ready"] if x != m.user_id]
+    if p.get("pending_rolls"):
+        p["pending_rolls"] = [r for r in p["pending_rolls"] if r.get("character_id") != m.character_id]
+    if ctx.settings.get("speaker_id") == m.user_id:
+        ctx.game.settings = {**(ctx.game.settings or {}), "speaker_id": None}
+        ctx.settings["speaker_id"] = None
+    c = ctx.db.get(Character, m.character_id) if m.character_id else None
+    if c:
+        c.sheet = ctx.chars.pop(c.id, c.sheet)
+        c.game_id = None
+    ctx.members = [x for x in ctx.members if x.id != m.id]
+    ctx.db.delete(m)
+    if ctx.game.status != "lobby" and m.role != "spectator":
+        ctx.log("system", f"{name} has left the party.")
+    return {"resolve": p.get("type") in ("exploration", "roll", "shop")}
+
+
 @router.post("/games/{gid}/leave")
 async def leave(gid: str, u: User = Depends(current_user)):
+    res = await mutate(gid, u, lambda ctx: _remove_member(ctx, _member(ctx, u)))
+    await hub.lobby_changed([u.id])
+    return res
+
+
+class RemoveBody(BaseModel):
+    user_id: str
+
+
+@router.post("/games/{gid}/remove-player")
+async def remove_player(gid: str, body: RemoveBody, u: User = Depends(current_user)):
     def fn(ctx: Ctx):
-        if ctx.game.status != "lobby":
-            raise RulesError("you can only leave before the game starts")
-        if ctx.game.host_id == u.id:
-            raise RulesError("the host can't leave their own game")
-        m = _member(ctx, u)
-        c = ctx.db.get(Character, m.character_id) if m.character_id else None
-        if c:
-            c.game_id = None
-            ctx.chars.pop(c.id, None)
-        ctx.db.delete(m)
-    return await mutate(gid, u, fn)
+        _host(ctx, u)
+        m = next((m for m in ctx.members if m.user_id == body.user_id), None)
+        if not m:
+            raise RulesError("they aren't in this game")
+        return _remove_member(ctx, m)
+    res = await mutate(gid, u, fn)
+    await hub.lobby_changed([body.user_id])  # the removed player's game list
+    return res
+
+
+@router.delete("/games/{gid}")
+async def delete_game(gid: str, u: User = Depends(current_user)):
+    """The host deletes a game for everyone. Characters are kept (freed for other games)."""
+    async with lock_for(gid):
+        db = SessionLocal()
+        try:
+            g = db.get(Game, gid)
+            if not g:
+                raise HTTPException(404, "game not found")
+            if g.host_id != u.id:
+                raise HTTPException(403, "only the host can delete a game")
+            if g.dm_busy:
+                raise HTTPException(409, "the DM is writing — try again in a moment")
+            members = [m.user_id for m in db.scalars(select(Membership).where(Membership.game_id == gid))]
+            db.execute(update(Character).where(Character.game_id == gid).values(game_id=None))
+            for model in (LogEntry, DMCall, Membership):
+                db.execute(delete(model).where(model.game_id == gid))
+            db.execute(delete(Game).where(Game.id == gid))
+            db.commit()
+        finally:
+            db.close()
+    await hub.game_changed(gid)
+    await hub.lobby_changed(members)
+    return {"ok": True}
 
 
 # ── playing ─────────────────────────────────────────────────────────────────
@@ -1212,7 +1277,9 @@ async def recap(gid: str, u: User = Depends(current_user)):
         if not rows:
             return {"text": "You're all caught up."}
         lines = [f"- [{r.kind}{' · ' + r.author if r.author else ''}] {r.text[:700]}" for r in rows]
-        user = (f"Story summary so far: {ctx.summary or '(none)'}\n\nWhat happened since the player last looked "
+        # The players' story summary, never the DM's private notes (they hold the campaign's secrets).
+        known = (ctx.state.get("story_summary") or {}).get("text") or "(none)"
+        user = (f"Story summary so far: {known}\n\nWhat happened since the player last looked "
                 f"(oldest first):\n" + "\n".join(lines))
         try:
             engine = flow._engine_for(ctx)
@@ -1222,6 +1289,60 @@ async def recap(gid: str, u: User = Depends(current_user)):
         return {"text": text}
     finally:
         db.close()
+
+
+_story_locks: dict[str, asyncio.Lock] = {}
+STORY_MAX_CHARS = 60000  # of new log text per update; older entries are already in the previous summary
+
+
+@router.post("/games/{gid}/story")
+async def story_summary(gid: str, u: User = Depends(current_user)):
+    """The players' 'story so far': a summary the DM keeps up to date, rewritten when new narration comes in."""
+    from .dm import engines as eng
+    lock = _story_locks.setdefault(gid, asyncio.Lock())
+    async with lock:  # two players opening the tab at once share one write-up
+        db = SessionLocal()
+        try:
+            try:
+                ctx = load(db, gid)
+            except RulesError:
+                raise HTTPException(404, "game not found")
+            _member(ctx, u)
+            cur = ctx.state.get("story_summary") or {}
+            upto = cur.get("upto_id") or 0
+            rows = list(db.scalars(select(LogEntry).where(
+                LogEntry.game_id == gid, LogEntry.id > upto,
+                LogEntry.kind.in_(["narration", "event", "action"])).order_by(LogEntry.id)))
+            if not any(r.kind == "narration" for r in rows):
+                return {"text": cur.get("text", ""), "updated_at": cur.get("updated_at"), "upto_id": upto}
+            lines, size = [], 0
+            for r in reversed(rows):
+                line = f"- [{r.kind}{' · ' + r.author if r.author and r.kind != 'narration' else ''}] {r.text[:1500]}"
+                size += len(line)
+                if size > STORY_MAX_CHARS:
+                    break
+                lines.append(line)
+            lines.reverse()
+            user = (f"Your previous story-so-far:\n{cur.get('text') or '(none yet — this is the first one)'}"
+                    f"\n\nWhat has happened since (oldest first):\n" + "\n".join(lines))
+            try:
+                text = (await flow._engine_for(ctx).summarize(eng.STORY_SYSTEM, user)).strip()
+            except eng.DMError as e:
+                raise HTTPException(400, f"couldn't write the story so far: {e}")
+            if not text:
+                raise HTTPException(400, "couldn't write the story so far: the DM returned nothing")
+            new = {"text": text, "upto_id": rows[-1].id, "updated_at": datetime.now(timezone.utc).isoformat()}
+        finally:
+            db.close()
+        async with lock_for(gid):
+            db = SessionLocal()
+            try:
+                ctx = load(db, gid)
+                ctx.state["story_summary"] = new
+                ctx.save()
+            finally:
+                db.close()
+        return new
 
 
 @router.post("/games/{gid}/retry-dm")
