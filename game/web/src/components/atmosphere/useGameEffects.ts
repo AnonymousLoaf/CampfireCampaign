@@ -6,10 +6,20 @@ import { getPrefs } from "../../util/prefs";
 import { showDice } from "../DiceRoller";
 
 type RollData = {
-  roll?: { natural?: number; total?: number; modifier?: number; rolls?: number[]; advantage?: string };
+  roll?: { natural?: number | null; total?: number; modifier?: number; rolls?: number[]; advantage?: string; notation?: string };
   dc?: number | null;
   character_id?: string;
+  /** Spell dice outside a fight: the total with the spellcasting bonus, and "healing" or "<type> damage". */
+  spell_total?: number;
+  bonus?: number;
+  what?: string;
 };
+
+/** "2d8+3" → 8 (the die size), or 0. */
+function sidesOf(notation?: string): number {
+  const m = /d(\d+)/.exec(notation ?? "");
+  return m ? Number(m[1]) : 0;
+}
 
 /**
  * Reacts to NEW log entries only (never replays history on load): sound effects, the dice overlay,
@@ -55,6 +65,20 @@ export function useGameEffects(view: GameView, opts: { tv?: boolean } = {}) {
           sounds.push("dice");
           const rd = (d ?? {}) as RollData;
           const r = rd.roll;
+          if (r && typeof r.natural !== "number" && r.notation && r.rolls?.length && sidesOf(r.notation)) {
+            // a spell's healing or damage dice (Cure Wounds' 2d8…)
+            const c = rd.character_id ? view.characters[rd.character_id] : undefined;
+            const sides = sidesOf(r.notation);
+            showDice({
+              kind: rd.what === "healing" ? "heal" : "damage",
+              dice: r.rolls.map((v) => ({ sides, value: v })),
+              total: rd.spell_total ?? r.total ?? 0,
+              modifier: rd.bonus ?? r.modifier,
+              label: rollLabel(e.text, c?.name),
+              who: c?.name,
+              color: c?.color,
+            });
+          }
           if (r && typeof r.natural === "number" && typeof r.total === "number") {
             const c = rd.character_id ? view.characters[rd.character_id] : undefined;
             const dc = typeof rd.dc === "number" ? rd.dc : null;
@@ -77,8 +101,30 @@ export function useGameEffects(view: GameView, opts: { tv?: boolean } = {}) {
         case "combat": {
           sounds.push(...combatEffect(e.text, d));
           // A player's own attack roll (typed combat: they clicked Roll) gets the dice too.
-          const cd = (d ?? {}) as { attacker?: string; roll?: RollData["roll"]; hit?: boolean; attack?: string; damage?: number };
+          const cd = (d ?? {}) as {
+            attacker?: string;
+            target?: string;
+            roll?: RollData["roll"];
+            hit?: boolean;
+            attack?: string;
+            damage?: number;
+            damage_dice?: { sides: number; value: number }[];
+            heal?: number;
+          };
           const r = cd.roll;
+          // healing in a fight (Cure Wounds on an ally): its dice roll too
+          if (typeof cd.heal === "number" && r && r.notation && r.rolls?.length && sidesOf(r.notation)) {
+            const t = cd.target?.startsWith("pc-") ? view.characters[cd.target.slice(3)] : undefined;
+            const sides = sidesOf(r.notation);
+            showDice({
+              kind: "heal",
+              dice: r.rolls.map((v) => ({ sides, value: v })),
+              total: r.total ?? cd.heal,
+              modifier: r.modifier,
+              label: t ? `${t.name} is healed` : "Healing",
+              color: t?.color,
+            });
+          }
           if (cd.attacker?.startsWith("pc-") && r && typeof r.natural === "number" && typeof r.total === "number") {
             const c = view.characters[cd.attacker.slice(3)];
             showDice({
@@ -94,6 +140,17 @@ export function useGameEffects(view: GameView, opts: { tv?: boolean } = {}) {
               who: c?.name,
               color: c?.color,
             });
+            // then the damage dice, thrown after the attack lands
+            if (cd.hit && cd.damage_dice?.length && typeof cd.damage === "number") {
+              showDice({
+                kind: "damage",
+                dice: cd.damage_dice,
+                total: cd.damage,
+                label: `${cd.attack ?? "Attack"} damage`,
+                who: c?.name,
+                color: c?.color,
+              });
+            }
           }
           break;
         }

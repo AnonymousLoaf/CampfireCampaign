@@ -269,6 +269,19 @@ TOOLS: list[dict] = [
      "description": "Replace the running story summary you'll be given in future turns. Keep it under 300 words: key "
                     "events, open threads, secrets, NPC attitudes. Update it whenever something important changes.",
      "input_schema": {"type": "object", "properties": {"summary": {"type": "string"}}, "required": ["summary"]}},
+    {"name": "grant_boon",
+     "description": "Give a character something earned in play, shown on their sheet: a Boon (a supernatural gift for "
+                    "a great deed), a Dark Bargain (real power with a real price you will collect), a Thread (a "
+                    "personal goal or tie that pays off when pursued), Renown (standing with a faction, e.g. 'Harbour "
+                    "Guild: 2, trusted courier'), or other. Invent them to fit the story; spread them fairly across "
+                    "the party. Granting the same kind and name again updates it; remove takes it away.",
+     "input_schema": {"type": "object", "properties": {
+         "character": {"type": "string"},
+         "kind": {"type": "string", "enum": ["boon", "dark_bargain", "thread", "renown", "other"]},
+         "name": {"type": "string", "description": "Short title, e.g. 'Blessing of the Drowned Bell' or 'Blue-coats'"},
+         "description": {"type": "string", "description": "What it does, in rules terms the table can use, and any price"},
+         "remove": {"type": "boolean"}},
+         "required": ["character", "kind", "name"]}},
     {"name": "note_facts",
      "description": "Your fact sheet: short facts you must keep consistent, shown to you every turn. Record anything "
                     "concrete as soon as you state it: counts and distances ('Shaft: 60 rungs; rung 43 flinches'), "
@@ -896,6 +909,31 @@ class ToolBox:
         self.ctx.summary = summary[:4000]
         return "Summary saved."
 
+    BOON_LABEL = {"boon": "Boon", "dark_bargain": "Dark Bargain", "thread": "Thread", "renown": "Renown", "other": "Gift"}
+
+    def t_grant_boon(self, character: str, kind: str, name: str, description: str = "", remove: bool = False) -> str:
+        cid, s = self._char(character)
+        label = self.BOON_LABEL.get(kind, "Gift")
+        title = f"{label}: {name.strip()[:60]}"
+        custom = s.setdefault("custom", [])
+        old = next((c for c in custom if c.get("source") == "dm" and c.get("name", "").lower() == title.lower()), None)
+        if remove:
+            if not old:
+                raise RulesError(f"{s['name']} has no {title}")
+            custom.remove(old)
+            self.ctx.log("event", f"{s['name']} loses {title}.")
+            return "removed"
+        if not description.strip() and not old:
+            raise RulesError("describe what it does (and any price)")
+        entry = old or {"entry_id": "dm-" + uuid.uuid4().hex[:8], "kind": "feature", "level": None, "data": {},
+                        "source": "dm"}
+        entry.update({"name": title, "description": (description.strip() or entry.get("description", ""))[:1500],
+                      "data": {**(entry.get("data") or {}), "boon_kind": kind}})
+        if not old:
+            custom.append(entry)
+        self.ctx.log("event", f"{s['name']} {'gains' if not old else 'updates'} {title}.")
+        return f"{'Granted' if not old else 'Updated'}: {title} for {s['name']}."
+
     def t_note_facts(self, set: dict | None = None, remove: list | None = None) -> str:  # noqa: A002 (tool arg name)
         facts: dict = self.ctx.state.setdefault("facts", {})
         for k in remove or []:
@@ -964,7 +1002,8 @@ def _roll_spell_dice(ctx: Ctx, roll: dict) -> dict:
                f"{roll.get('bonus', 0):+d})."
     roll["result"] = {"total": total, "rolls": r.rolls, "modifier": roll.get("bonus", 0), "natural": None,
                       "success": None, "lines": [text], "text": text}
-    ctx.log("roll", text, None, {"roll": r.as_dict(), "character_id": roll["character_id"]})
+    ctx.log("roll", text, None, {"roll": r.as_dict(), "character_id": roll["character_id"], "spell_total": total,
+                                 "bonus": roll.get("bonus", 0), "what": roll.get("what")})
     return roll
 
 

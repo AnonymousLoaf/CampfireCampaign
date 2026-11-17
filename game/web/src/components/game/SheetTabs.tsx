@@ -108,10 +108,11 @@ function CustomEntries({ c, kinds, manage }: { c: CharacterView; kinds: CustomKi
       {list.map((x) => (
         <details key={x.entry_id} className="feature custom">
           <summary>
-            {x.name} <span className="badge tiny custom-tag">custom</span>
+            {x.name}{" "}
+            {x.source === "dm" ? <span className="badge tiny gold" title="Granted by the DM in play">from the DM</span> : <span className="badge tiny custom-tag">custom</span>}
             {x.kind !== "feat" && x.kind !== "feature" && <span className="muted small"> · {KIND_LABEL[x.kind] ?? x.kind}</span>}
             {x.level !== null && x.level !== undefined && x.kind === "spell" && <span className="muted small"> · {x.level === 0 ? "cantrip" : `L${x.level}`}</span>}
-            {manage && (
+            {manage && x.source !== "dm" && (
               <button
                 className="chip-x"
                 title="Detach from this character"

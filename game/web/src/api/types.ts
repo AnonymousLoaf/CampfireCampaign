@@ -382,6 +382,8 @@ export interface AttachedCustom {
   name: string;
   description: string;
   level?: number | null;
+  /** "library" (my content), "ddb" (imported), or "dm" (granted by the DM in play: boons, bargains, renown). */
+  source?: string;
 }
 
 /** An entry in my private custom content library. */

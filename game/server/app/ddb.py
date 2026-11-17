@@ -71,6 +71,12 @@ def detect_ruleset(d: dict) -> str:
     return "2014"
 
 
+# D&D Beyond marks placeholder "feats" with these: a campaign's optional rules ("Hero's Journey Boon", "Dark Bargain",
+# "Faction Renown" — reminders that grant nothing until a DM does) and background ability-score bookkeeping. They
+# aren't imported, so joining through D&D Beyond gives no head start: the DM hands out boons in play (grant_boon).
+PLACEHOLDER_TAGS = {"__DISGUISE_FEAT", "__INITIAL_ASI"}
+
+
 def _ddb_features(d: dict, main_class: dict | None) -> list[dict]:
     """Every named feature on the D&D Beyond sheet: class/subclass features, feats, species traits, background feature."""
     out: list[dict] = []
@@ -84,6 +90,9 @@ def _ddb_features(d: dict, main_class: dict | None) -> list[dict]:
                             "level": req or None})
     for f in d.get("feats") or []:
         df = f.get("definition") or {}
+        tags = {c.get("tagName") for c in df.get("categories") or [] if isinstance(c, dict)}
+        if tags & PLACEHOLDER_TAGS:  # not a real feat: a campaign's optional-rule reminder or ASI bookkeeping
+            continue
         if df.get("name"):
             out.append({"kind": "feat", "name": df["name"], "description": _text(df.get("description")), "level": None})
     for t in (d.get("race") or {}).get("racialTraits") or []:
@@ -102,6 +111,45 @@ def _ddb_features(d: dict, main_class: dict | None) -> list[dict]:
             seen.add(k)
             uniq.append(f)
     return uniq
+
+
+# D&D Beyond's own bookkeeping entries: the game shows these itself, so they aren't kept as custom text
+BOOKKEEPING = {"creature type", "size", "speed", "ability score increases", "ability score increase", "languages",
+               "age", "alignment", "proficiencies", "hit points", "equipment"}
+
+
+def norm_name(name: str) -> str:
+    """'Thieves’ Cant' / 'Magic Initiate (Wizard)' / 'Darkvision (60 ft.)' → comparable keys."""
+    n = (name or "").replace("’", "'").replace("‘", "'").lower().strip()
+    return re.sub(r"\s*\(.*\)$", "", n).strip()
+
+
+def is_bookkeeping(name: str) -> bool:
+    n = norm_name(name)
+    return (n in BOOKKEEPING or bool(re.fullmatch(r"core [a-z ]+ traits", n))
+            or n.endswith("ability score improvements"))
+
+
+def known_names(sheet: dict) -> set[str]:
+    """Names the game already covers for this character: its features, feats, and species traits."""
+    have = {norm_name(f["name"]) for f in sheet.get("features") or []} | {norm_name(f) for f in sheet.get("feats") or []}
+    if sheet.get("ruleset") == "2024":
+        sp = ch._species_2024().get(sheet.get("race") or "") or {}
+        traits = {norm_name(t if isinstance(t, str) else t.get("name", "")) for t in sp.get("traits") or []}
+        have |= traits | {f"{t} spells" for t in traits}  # "Elven Lineage Spells": the game grants lineage spells
+    else:
+        r = srd.races().get(sheet.get("race") or "") or {}
+        have |= {norm_name(t.get("name", "") if isinstance(t, dict) else t) for t in r.get("traits") or []}
+    return have
+
+
+def clean_imported(sheet: dict) -> list[str]:
+    """Drop imported custom entries that only repeat what the game already covers; returns the names dropped."""
+    have = known_names(sheet)
+    dropped = [c["name"] for c in sheet.get("custom") or []
+               if c.get("source") == "ddb" and (norm_name(c["name"]) in have or is_bookkeeping(c["name"]))]
+    sheet["custom"] = [c for c in sheet.get("custom") or [] if c["name"] not in dropped or c.get("source") != "ddb"]
+    return dropped
 
 
 def to_sheet(d: dict) -> dict:
@@ -196,7 +244,7 @@ def to_sheet(d: dict) -> dict:
 
     sheet: dict = {
         "ruleset": ruleset, "name": rep["name"][:40], "race": race_key, "subrace": sub_key, "class": cls_key,
-        "subclass": sub_index or sub_name, "background": bg_key, "alignment": "True Neutral", "backstory": "",
+        "subclass": sub_index or sub_name, "background": bg_key, "alignment": "True Neutral", "backstory": _text((d.get("notes") or {}).get("backstory"))[:4000],
         "color": "#5b8fd1", "level": 1, "xp": 0, "level_target": 1, "abilities": scores, "base_abilities": dict(scores),
         "bonus_abilities": [], "ancestry": None, "feats": [], "masteries": [], "exhaustion": 0,
         "skill_profs": sorted(profs), "expertise": sorted(expertise), "save_profs": list(cls["saves"]),
@@ -244,11 +292,38 @@ def to_sheet(d: dict) -> dict:
             elif sp.get("prepared") or sp.get("alwaysPrepared") or cls_key == "wizard":
                 sheet["spells"]["spells"].append(k)
 
-    # feats the game knows by name
+    # feats the game knows by name ("Magic Initiate (Wizard)" is the game's "Magic Initiate")
+    mi_list = None
     for f in d.get("feats") or []:
         nm = ((f.get("definition") or {}).get("name") or "")
+        base = re.sub(r"\s*\(.*\)$", "", nm)
         if nm in rules.FEATS:
             sheet["feats"].append(nm)
+        elif base in rules.FEATS:
+            sheet["feats"].append(base)
+            if base == "Magic Initiate":
+                mi_list = re.search(r"\((\w+)\)", nm).group(1).title() if "(" in nm else None
+
+    # spells granted by feats (Magic Initiate's two cantrips and 1st-level spell) and by items
+    granted = [((s.get("definition") or {}).get("name") or "", (s.get("definition") or {}).get("level") or 0)
+               for k in ("feat", "item", "background") for s in ((d.get("spells") or {}).get(k) or [])
+               if isinstance(s, dict)]
+    for nm, lvl in granted:
+        k = by_name.get(nm.lower().replace("'", ""))
+        if not k:
+            if nm:
+                extra_spells.append({"kind": "spell", "name": nm, "description": "Granted by a feat or item on D&D "
+                                     "Beyond.", "level": lvl, "data": {"level": lvl}})
+            continue
+        bucket = "bonus_cantrips" if lvl == 0 else "bonus_spells"
+        if k not in sheet["spells"]["cantrips"] + sheet["spells"]["spells"]:
+            sheet["spells"].setdefault(bucket, []).append(k)
+    if mi_list or any(f.startswith("Magic Initiate") for f in sheet["feats"]):
+        picked_ab = next((ab.upper()[:3] for o in (d.get("options") or {}).get("feat") or []
+                          for ab in [((o.get("definition") or {}).get("name") or "")]
+                          if ab.lower() in ("intelligence", "wisdom", "charisma")), None)
+        sheet["mi_ability"] = picked_ab or {"Cleric": "WIS", "Druid": "WIS", "Wizard": "INT"}.get(mi_list or "", "INT")
+        sheet["mi_free_used"] = False
 
     hd = cls["hit_die"]
     sheet["hp_max"] = hd + ch.mod(scores["CON"])
@@ -289,10 +364,10 @@ def to_sheet(d: dict) -> dict:
     sheet["level_target"] = sheet["level"]
 
     # keep everything the game's tables don't cover as custom entries the DM can read
-    have = {f["name"].lower() for f in sheet["features"]} | {f.lower() for f in sheet["feats"]}
+    have = known_names(sheet)
     kept = []
     for f in _ddb_features(d, main) + extra_spells:
-        if f["name"].lower() in have:
+        if norm_name(f["name"]) in have or is_bookkeeping(f["name"]):
             continue
         entry = {"entry_id": "ddb-" + uuid.uuid4().hex[:8], "kind": f["kind"], "name": f["name"][:80],
                  "description": f["description"][:3000], "level": f.get("level"), "data": f.get("data") or {},

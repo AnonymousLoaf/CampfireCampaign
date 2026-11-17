@@ -467,6 +467,11 @@ def _lucky(att: dict, chars: dict, r: dict, bonus: int, adv: str) -> dict:
     return r
 
 
+def _sides(notation: str) -> int:
+    m = re.search(r"d(\d+)", notation or "")
+    return int(m.group(1)) if m else 0
+
+
 def resolve_attack(enc: dict, chars: dict, att: dict, tgt: dict, *, name: str, to_hit: int, dmg: str, dtype: str,
                    ranged: bool, normal: int | None, crit_on: int = 20, weapon: bool = True, spell: bool = False,
                    finesse: bool = False, weapon_die: str | None = None, mastery: str | None = None,
@@ -518,7 +523,14 @@ def resolve_attack(enc: dict, chars: dict, att: dict, tgt: dict, *, name: str, t
             out.append(line(f"Graze: {tgt['name']} still takes {dealt} {dtype} damage." + _status_text(tgt["name"], note), "combat"))
             out += extra
         return out
-    total = dice.damage(dmg, crit).total
+    dmg_dice: list[dict] = []  # every damage die rolled, for the dice on the table
+
+    def roll_dmg(notation: str) -> int:
+        r_ = dice.damage(notation, crit)
+        dmg_dice.extend({"sides": _sides(notation), "value": v} for v in r_.rolls)
+        return r_.total
+
+    total = roll_dmg(dmg)
     out_extra: list[dict] = []
     s = sheet_of(att, chars)
     melee_weapon = weapon and not ranged
@@ -541,24 +553,24 @@ def resolve_attack(enc: dict, chars: dict, att: dict, tgt: dict, *, name: str, t
                 total += extra
                 notes.append(f"+{extra} brutal")
         if weapon and ch.has_feature(s, "Divine Strike") and not att.get("divine_strike_used"):
-            ds = dice.damage("1d8" if s["level"] < 14 else "2d8", crit).total
+            ds = roll_dmg("1d8" if s["level"] < 14 else "2d8")
             total += ds
             att["divine_strike_used"] = True
             notes.append(f"+{ds} divine strike")
         mark = tgt.get("mark")
         if mark and mark.get("by") == att["id"] and (weapon or mark.get("any_attack")):
-            m = dice.damage(mark["dice"], crit).total
+            m = roll_dmg(mark["dice"])
             total += m
             notes.append(f"+{m} mark")
         if weapon and s["class"] == "ranger" and s.get("subclass") == "hunter" and not att.get("colossus_used") \
                 and _below_max(tgt, chars):
-            c = dice.damage("1d8", crit).total
+            c = roll_dmg("1d8")
             total += c
             att["colossus_used"] = True
             notes.append(f"+{c} colossus slayer")
         if weapon and s["class"] == "rogue" and not att.get("sneak_used") and (finesse or ranged) and adv != "disadvantage" and \
                 (adv == "advantage" or any(dist(a, tgt) <= 5 for a in allies(enc, att, chars) if not incapacitated(a, chars))):
-            sa = dice.damage(f"{(s['level'] + 1) // 2}d6", crit).total
+            sa = roll_dmg(f"{(s['level'] + 1) // 2}d6")
             total += sa
             att["sneak_used"] = True
             notes.append(f"+{sa} sneak attack")
@@ -567,7 +579,7 @@ def resolve_attack(enc: dict, chars: dict, att: dict, tgt: dict, *, name: str, t
             if slot:
                 ch.use_slot(s, slot)
                 n = min(5, 1 + slot + (1 if tgt.get("ctype") in ("undead", "fiend") else 0))
-                sm = dice.damage(f"{n}d8", crit).total
+                sm = roll_dmg(f"{n}d8")
                 total += sm
                 notes.append(f"+{sm} radiant smite")
             att["smite_armed"] = False
@@ -590,6 +602,7 @@ def resolve_attack(enc: dict, chars: dict, att: dict, tgt: dict, *, name: str, t
         notes.append("halved by Uncanny Dodge")
     dealt, note, extra_lines = apply_damage(enc, chars, tgt, max(1, total), dtype, att)
     data["damage"] = dealt
+    data["damage_dice"] = [d_ for d_ in dmg_dice if d_["sides"]][:20]
     note_txt = f" ({', '.join(notes)})" if notes else ""
     out = [line(f"{head} — {'critical hit' if crit else 'hit'}! {dealt} {dtype} damage{note_txt}."
                 + _status_text(tgt["name"], note), "combat", **data)] + out_extra + extra_lines
@@ -954,7 +967,8 @@ def cast(enc: dict, chars: dict, tid: str, spell_index: str, target_id: str | No
             healed = ch.heal(chars[a["character_id"]], amount)
             out.append(line(f"{a['name']} regains {healed} HP ({' + '.join(map(str, hr.rolls))}{bonus:+d} = {amount}).",
                             "combat", target=a["id"], heal=healed,
-                            roll={"rolls": hr.rolls, "natural": None, "modifier": bonus, "total": amount}))
+                            roll={"rolls": hr.rolls, "natural": None, "modifier": bonus, "total": amount,
+                                  "notation": hr.notation}))
         if ch.has_feature(s, "Blessed Healer") and any(a["id"] != t["id"] for a in targets) and slot:
             bh = ch.heal(s, 2 + slot)
             if bh:

@@ -71,6 +71,9 @@ How the game works:
   the same moment). Whenever you state a concrete number, position, condition or count, record it with note_facts.
 - Spells outside a fight go through cast_spell (it spends the slot and rolls the dice); never just pick a healing
   number with heal.
+- Boons, Dark Bargains, Threads and faction Renown are yours to invent and hand out in play with grant_boon:
+  a boon for a great deed, a bargain offered by something that wants a price, a thread when a character takes on a
+  personal goal, renown when a faction notices them. Keep them meaningful and rare, and fair across the party.
 - Keep the party's NPC list, quest journal and the story summary (update_summary) current.
 
 What makes a great DM — hard constraints:

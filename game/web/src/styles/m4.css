@@ -1008,3 +1008,52 @@
   flex: 1;
   min-width: 0;
 }
+
+/* --- Physics dice: thrown across the whole screen; the result appears where they stop --- */
+.dice-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  pointer-events: none;
+  overflow: hidden;
+}
+.dice-layer .dice-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+.dice-caption {
+  position: absolute;
+  transform: translate(-50%, 0);
+  pointer-events: auto;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+  min-width: 200px;
+  max-width: min(420px, calc(100vw - 24px));
+  padding: 10px 16px 12px;
+  background: rgba(20, 16, 12, 0.9);
+  border: 1px solid var(--border-2);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  animation: dice-in 0.25s ease-out both;
+}
+.dice-caption.crit {
+  border-color: var(--gold-2);
+  box-shadow: 0 0 0 2px rgba(240, 198, 107, 0.4), 0 0 40px rgba(240, 198, 107, 0.45), var(--shadow);
+}
+.dice-caption.fumble {
+  border-color: var(--red-2);
+  box-shadow: 0 0 30px rgba(201, 72, 59, 0.4), var(--shadow);
+}
+.dice-layer.tv .dice-caption {
+  font-size: 1.6rem;
+  padding: 18px 26px 22px;
+  max-width: 70vw;
+}
+.dice-caption .dice-total {
+  font-size: 1.15rem;
+}
