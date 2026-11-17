@@ -55,3 +55,16 @@ def test_ddb_import_falls_back_to_the_lineage_spell_and_flags_unknowns():
     assert ddb.to_sheet(d)["subrace"] == "elven-lineage-drow"
     s = ddb.to_sheet(_ddb_json(legacy=False))  # nothing to go on
     assert s["subrace"] is None and any("lineage" in i["issue"] for i in s["issues"])
+
+
+def test_ddb_import_brings_magic_initiate_spells():
+    d = _ddb_json(legacy=False)
+    d["feats"] = [{"definition": {"name": "Magic Initiate (Wizard)", "description": "<p>Two cantrips and a spell.</p>"}}]
+    d["spells"] = {"feat": [{"definition": {"name": "True Strike", "level": 0}},
+                            {"definition": {"name": "Poison Spray", "level": 0}},
+                            {"definition": {"name": "Disguise Self", "level": 1}}]}
+    d["options"] = {"feat": [{"definition": {"name": "Charisma"}}]}
+    s = ddb.to_sheet(d)
+    v = ch.view("x", "u", None, s)
+    assert "Magic Initiate" in s["feats"] and s["mi_ability"] == "CHA"
+    assert {"True Strike", "Poison Spray"} <= set(_names(v, "cantrips")) and "Disguise Self" in _names(v, "spells")

@@ -244,11 +244,38 @@ def to_sheet(d: dict) -> dict:
             elif sp.get("prepared") or sp.get("alwaysPrepared") or cls_key == "wizard":
                 sheet["spells"]["spells"].append(k)
 
-    # feats the game knows by name
+    # feats the game knows by name ("Magic Initiate (Wizard)" is the game's "Magic Initiate")
+    mi_list = None
     for f in d.get("feats") or []:
         nm = ((f.get("definition") or {}).get("name") or "")
+        base = re.sub(r"\s*\(.*\)$", "", nm)
         if nm in rules.FEATS:
             sheet["feats"].append(nm)
+        elif base in rules.FEATS:
+            sheet["feats"].append(base)
+            if base == "Magic Initiate":
+                mi_list = re.search(r"\((\w+)\)", nm).group(1).title() if "(" in nm else None
+
+    # spells granted by feats (Magic Initiate's two cantrips and 1st-level spell) and by items
+    granted = [((s.get("definition") or {}).get("name") or "", (s.get("definition") or {}).get("level") or 0)
+               for k in ("feat", "item", "background") for s in ((d.get("spells") or {}).get(k) or [])
+               if isinstance(s, dict)]
+    for nm, lvl in granted:
+        k = by_name.get(nm.lower().replace("'", ""))
+        if not k:
+            if nm:
+                extra_spells.append({"kind": "spell", "name": nm, "description": "Granted by a feat or item on D&D "
+                                     "Beyond.", "level": lvl, "data": {"level": lvl}})
+            continue
+        bucket = "bonus_cantrips" if lvl == 0 else "bonus_spells"
+        if k not in sheet["spells"]["cantrips"] + sheet["spells"]["spells"]:
+            sheet["spells"].setdefault(bucket, []).append(k)
+    if mi_list or any(f.startswith("Magic Initiate") for f in sheet["feats"]):
+        picked_ab = next((ab.upper()[:3] for o in (d.get("options") or {}).get("feat") or []
+                          for ab in [((o.get("definition") or {}).get("name") or "")]
+                          if ab.lower() in ("intelligence", "wisdom", "charisma")), None)
+        sheet["mi_ability"] = picked_ab or {"Cleric": "WIS", "Druid": "WIS", "Wizard": "INT"}.get(mi_list or "", "INT")
+        sheet["mi_free_used"] = False
 
     hd = cls["hit_die"]
     sheet["hp_max"] = hd + ch.mod(scores["CON"])
