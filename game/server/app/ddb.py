@@ -127,19 +127,39 @@ def to_sheet(d: dict) -> dict:
 
     species = (rep.get("species") or "Human")
     race_key, sub_key = "human", None
+    lineage_ability = None
     if ruleset == "2024":
         sp_all = ch._species_2024()
+        # 2024 lineages aren't in the species name ("Elf"): D&D Beyond keeps them as species options ("Wood Elf
+        # Lineage", "Wood Elf - Charisma") and lists the lineage's spells under spells.race ("Druidcraft").
+        picked = [str((o.get("definition") or {}).get("name") or "") for o in (d.get("options") or {}).get("race") or []]
+        race_spells = {_slug((s.get("definition") or {}).get("name") or "")
+                       for s in ((d.get("spells") or {}).get("race") or []) if isinstance(s, dict)}
+        hay = " | ".join([species] + picked).lower()
         for idx, sp in sp_all.items():
             if sp.get("name", "").lower() in species.lower():
                 race_key = idx
+                lineage = (R("2024").SPECIES.get(idx) or {}).get("mechanics", {}).get("lineage_spells") or {}
                 for sub in sp.get("subspecies", []):
                     tail = sub["name"].split(":")[-1].strip().lower()
-                    if tail and tail in species.lower():
+                    if tail and tail in hay:
                         sub_key = sub["index"]
+                        break
+                if not sub_key and race_spells:  # fall back to the lineage's level-1 spell
+                    sub_key = next((s for s, by_lvl in lineage.items()
+                                    if set(by_lvl.get(1) or by_lvl.get("1") or []) & race_spells), None)
                 break
         else:
             issues.append({"issue": f"species {species} isn't in the free 2024 rules; its traits are kept as custom entries",
                            "fix": ""})
+        for name in picked:  # "Wood Elf - Charisma": the ability the lineage's spells use
+            ab = re.search(r"\b(intelligence|wisdom|charisma)\b", name.lower())
+            if ab and " - " in name:
+                lineage_ability = ab.group(1)[:3].upper()
+                break
+        if sub_key is None and sp_all.get(race_key, {}).get("subspecies"):
+            issues.append({"issue": f"couldn't tell which {species} lineage was chosen on D&D Beyond, so its lineage "
+                                    f"spells and traits are missing", "fix": "tell the host which lineage it is"})
     else:
         for sr in srd.subraces().values():
             if sr["name"].lower() == species.lower():
@@ -185,6 +205,8 @@ def to_sheet(d: dict) -> dict:
         "spells": {"cantrips": [], "spells": []}, "slots_used": {}, "pact_used": 0, "hit_dice_used": 0, "temp_hp": 0,
         "concentration": None, "custom": [], "source": "ddb", "issues": issues, "ddb_id": d.get("id"),
     }
+    if lineage_ability:
+        sheet["lineage_ability"] = lineage_ability
     cur = d.get("currencies") or {}
     sheet["gold_cp"] = int(cur.get("cp", 0) or 0) + 10 * int(cur.get("sp", 0) or 0) + 50 * int(cur.get("ep", 0) or 0) \
         + 100 * int(cur.get("gp", 0) or 0) + 1000 * int(cur.get("pp", 0) or 0)

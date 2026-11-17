@@ -104,6 +104,30 @@ def prepared_max(sheet: dict) -> int | None:
     return max(1, ab + lvl)
 
 
+def species_spells(sheet: dict) -> tuple[list[str], list[str]]:
+    """(cantrips, leveled spells) a 2024 species grants: always-known cantrips (a tiefling's Thaumaturgy) and the
+    chosen lineage's spells by character level (Wood Elf: Druidcraft, then Longstrider at 3, Pass without Trace at 5).
+    Lineage spells are always prepared; the DM rules the once-per-long-rest free cast."""
+    if rs(sheet) != "2024" or sheet.get("homebrew_race"):
+        return [], []
+    mech = race_info(sheet)["mechanics"]
+    have = srd.spells("2024")
+    cants = list(mech.get("always_cantrips") or [])
+    spells: list[str] = []
+    for lvl, idxs in ((mech.get("lineage_spells") or {}).get(sheet.get("subrace") or "") or {}).items():
+        if sheet["level"] >= int(lvl):
+            for i in idxs:
+                (cants if (have.get(i) or {}).get("level", 0) == 0 else spells).append(i)
+    return [i for i in dict.fromkeys(cants) if i in have], [i for i in dict.fromkeys(spells) if i in have]
+
+
+def lineage_ability(sheet: dict) -> str:
+    """The ability a species' spells use: the player's pick (INT, WIS or CHA), else the best of the three."""
+    if sheet.get("lineage_ability") in ("INT", "WIS", "CHA"):
+        return sheet["lineage_ability"]
+    return max(("INT", "WIS", "CHA"), key=lambda a: sheet["abilities"].get(a, 10))
+
+
 def always_prepared(sheet: dict) -> list[str]:
     sc = cls_of(sheet).get("spellcasting") or {}
     out = []
@@ -111,6 +135,7 @@ def always_prepared(sheet: dict) -> list[str]:
         if sheet["level"] >= int(lvl):
             out += idxs
     out += (sheet.get("spells") or {}).get("bonus_spells", [])
+    out += species_spells(sheet)[1]
     have = srd.spells(rs(sheet))
     return [i for i in dict.fromkeys(out) if i in have]
 
@@ -152,7 +177,8 @@ def ready_spells(sheet: dict) -> list[str]:
 
 def all_cantrips(sheet: dict) -> list[str]:
     sp = sheet.get("spells") or {}
-    return list(dict.fromkeys(list(sp.get("cantrips", [])) + list(sp.get("bonus_cantrips", []))))
+    return list(dict.fromkeys(list(sp.get("cantrips", [])) + list(sp.get("bonus_cantrips", []))
+                              + species_spells(sheet)[0]))
 
 
 def knows_spell(sheet: dict, index: str) -> bool:
@@ -212,7 +238,11 @@ def spell_ability(sheet: dict) -> str | None:
     sc = cls_of(sheet).get("spellcasting")
     if sc:
         return sc["ability"]
-    return sheet.get("mi_ability")  # Magic Initiate on a non-caster
+    if sheet.get("mi_ability"):
+        return sheet["mi_ability"]  # Magic Initiate on a non-caster
+    if any(species_spells(sheet)):
+        return lineage_ability(sheet)  # a non-caster with lineage magic (a wood elf rogue's Druidcraft)
+    return None
 
 
 def spell_save_dc(sheet: dict) -> int | None:
