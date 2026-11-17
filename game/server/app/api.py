@@ -487,6 +487,7 @@ class VoiceTestBody(BaseModel):
     blend_weight: float = Field(default=0.3, ge=0, le=0.9)
     speed: float = Field(default=1.0, ge=0.6, le=1.5)
     pitch: float = Field(default=0.0, ge=-6, le=6)
+    fx: str | None = None
 
 
 @router.get("/voices")
@@ -495,6 +496,20 @@ def list_voices(u: User = Depends(current_user)):
     from .game import voices
     return {"available": voices.available(), "voices": voices.FEMALE + voices.MALE,
             "narrator": voices.NARRATOR}
+
+
+class VoiceSuggestBody(BaseModel):
+    text: str = Field(default="", max_length=300)
+
+
+@router.post("/voices/suggest")
+def suggest_voice(body: VoiceSuggestBody, u: User = Depends(current_user)):
+    """Settings → Surprise me: a random recipe fitting whoever speaks in the line (male for 'the steward says')."""
+    from .game import voices
+    r = voices.suggest(body.text)
+    (v1, w1), *rest = r["mix"]
+    return {"voice": v1, "blend": rest[0][0] if rest else None, "blend_weight": rest[0][1] if rest else 0.3,
+            "speed": r["speed"], "pitch": r["pitch"], "fx": r.get("fx")}
 
 
 @router.post("/voices/test")
@@ -513,6 +528,8 @@ async def test_voice(body: VoiceTestBody, u: User = Depends(current_user)):
         if body.blend in allowed and body.blend != body.voice and body.blend_weight > 0:
             mix = [[body.voice, round(1 - body.blend_weight, 2)], [body.blend, round(body.blend_weight, 2)]]
         recipe = {"mix": mix, "speed": body.speed, "pitch": body.pitch}
+        if body.fx in ("rasp", "boom", "hollow"):
+            recipe["fx"] = body.fx
     else:
         raise HTTPException(400, "unknown voice")
     if body.voice == "narrator":

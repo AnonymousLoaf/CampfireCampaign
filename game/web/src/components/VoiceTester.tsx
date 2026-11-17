@@ -23,6 +23,7 @@ export default function VoiceTester() {
   const [weight, setWeight] = useState(0.3);
   const [speed, setSpeed] = useState(1);
   const [pitch, setPitch] = useState(0);
+  const [fx, setFx] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const audio = useRef<HTMLAudioElement | null>(null);
@@ -38,8 +39,8 @@ export default function VoiceTester() {
     return () => audio.current?.pause();
   }, []);
 
-  const play = async (o?: { voice: string; blend: string; weight: number; speed: number; pitch: number }) => {
-    const p = o ?? { voice, blend, weight, speed, pitch };
+  const play = async (o?: { voice: string; blend: string; weight: number; speed: number; pitch: number; fx: string }) => {
+    const p = o ?? { voice, blend, weight, speed, pitch, fx };
     setBusy(true);
     setErr(null);
     try {
@@ -50,6 +51,7 @@ export default function VoiceTester() {
         blend_weight: p.weight,
         speed: p.speed,
         pitch: p.pitch,
+        fx: p.fx || null,
       });
       audio.current?.pause();
       const a = new Audio(URL.createObjectURL(blob));
@@ -62,22 +64,18 @@ export default function VoiceTester() {
     }
   };
 
-  const surprise = () => {
+  const surprise = async () => {
     if (!voices?.length) return;
-    const v = pick(voices);
-    const same = voices.filter((x) => x !== v && x[1] === v[1]); // blend with a voice of the same gender
-    const o = {
-      voice: v,
-      blend: Math.random() < 0.8 && same.length ? pick(same) : "",
-      weight: Math.round((0.1 + Math.random() * 0.3) * 100) / 100,
-      speed: Math.round((0.88 + Math.random() * 0.24) * 100) / 100,
-      pitch: Math.round((Math.random() * 6 - 3) * 2) / 2,
-    };
+    // a random recipe that fits the speaker in the line ("the steward says" → a man's voice), like a new NPC gets
+    const r = await api.suggestVoice(text).catch(() => null);
+    const v = r?.voice ?? pick(voices);
+    const o = { voice: v, blend: r?.blend ?? "", weight: r?.blend_weight ?? 0.3, speed: r?.speed ?? 1, pitch: r?.pitch ?? 0, fx: r?.fx ?? "" };
     setVoice(o.voice);
     setBlend(o.blend);
     setWeight(o.weight);
     setSpeed(o.speed);
     setPitch(o.pitch);
+    setFx(o.fx);
     void play(o);
   };
 
@@ -93,7 +91,8 @@ export default function VoiceTester() {
           <p className="muted small">
             The voices the host PC reads narration with. Every NPC gets their own recipe like this (a voice, maybe a
             second one blended in, a speed and a pitch) and keeps it for the whole campaign. As in a game, words in
-            &quot;quotes&quot; are spoken in the voice below and the rest by the narrator.
+            &quot;quotes&quot; are spoken in the voice below and the rest by the narrator. For creatures, try Surprise me on
+            a line like &quot;…,&quot; the dragon rumbles (or the goblin, the orc, the wraith).
           </p>
           <textarea rows={3} maxLength={300} value={text} onChange={(e) => setText(e.target.value)} />
           <div className="row gap wrap">
@@ -141,11 +140,22 @@ export default function VoiceTester() {
             </span>
             <input type="range" min={-6} max={6} step={0.5} value={pitch} onChange={(e) => setPitch(Number(e.target.value))} />
           </label>
+          {voice !== "narrator" && (
+            <label className="field">
+              <span className="label">Texture</span>
+              <select value={fx} onChange={(e) => setFx(e.target.value)}>
+                <option value="">Clean</option>
+                <option value="rasp">Gravelly (orcs, goblins, demons)</option>
+                <option value="boom">Booming (dragons)</option>
+                <option value="hollow">Hollow echo (undead)</option>
+              </select>
+            </label>
+          )}
           <div className="row gap wrap">
             <button className="btn primary" disabled={busy} onClick={() => void play()}>
               {busy ? "Speaking…" : "▶ Play"}
             </button>
-            <button className="btn ghost" disabled={busy || !voices?.length} onClick={surprise} title="A random recipe, like a new NPC gets">
+            <button className="btn ghost" disabled={busy || !voices?.length} onClick={() => void surprise()} title="A random recipe for whoever speaks in the line, like a new NPC gets">
               🎲 Surprise me
             </button>
             <button
@@ -155,6 +165,7 @@ export default function VoiceTester() {
                 setBlend("");
                 setSpeed(1);
                 setPitch(0);
+                setFx("");
               }}
             >
               Reset

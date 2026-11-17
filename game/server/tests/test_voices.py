@@ -127,3 +127,43 @@ def test_voice_test_reads_quotes_in_the_voice_and_the_rest_as_narrator(monkeypat
         spoken = [(t, round(style, 1)) for t, style, _ in fake.calls]
         assert [t for t, _ in spoken] == ["Patrons do not descend,", "the steward says.", "Mind the rung."]
         assert spoken[0][1] == spoken[2][1] != spoken[1][1]  # quotes in Bella, the middle in the narrator
+
+
+def test_gendered_roles_pick_the_voice():
+    assert voices._gender("the steward") == "he" and voices._gender("the stewardess") == "she"
+    assert voices._gender("a priestess of the drowned temple") == "she" and voices._gender("the innkeeper") is None
+    assert voices.role_speaker("the steward says.") == "the steward"
+    assert voices.role_speaker("whispers the old woman") == "the old woman"
+    assert voices.role_speaker("a voice calls out:") is None
+    segs = voices.segments('"Patrons do not descend," the steward says. "Mind the rung."', [])
+    assert [s for _, s in segs] == ["the steward", None, "the steward"]
+    for _ in range(10):  # Surprise me keeps the gender, randomises the rest
+        assert all(v.startswith(("am_", "bm_")) for v, _ in voices.suggest('"Hush," the steward says.')["mix"])
+        assert all(v.startswith(("af_", "bf_")) for v, _ in voices.suggest('"Hush," the stewardess says.')["mix"])
+
+
+def test_suggest_endpoint(monkeypatch):
+    with TestClient(app):
+        c = _client("voicesuggest")
+        r = c.post("/api/voices/suggest", json={"text": '"Hush," the old woman whispers.'}).json()
+        assert r["voice"].startswith(("af_", "bf_")) and 0.6 <= r["speed"] <= 1.5 and -6 <= r["pitch"] <= 6
+
+
+def test_creatures_have_their_own_kind_of_voice():
+    dragon = voices.recipe_for("the dragon", "the dragon")
+    goblin = voices.recipe_for("the goblin", "the goblin")
+    orc = voices.recipe_for("Grukk", "an orc warchief")
+    wraith = voices.recipe_for("the wraith", "the wraith")
+    assert dragon["pitch"] <= -4 and dragon["speed"] < 0.9 and dragon["fx"] == "boom"
+    assert goblin["pitch"] >= 3 and goblin["speed"] > 1.05 and goblin["fx"] == "rasp"
+    assert -4 < orc["pitch"] < 0 and orc["fx"] == "rasp"
+    assert wraith["fx"] == "hollow"
+    x = np.sin(np.linspace(0, 200, 24000)).astype(np.float32) * 0.5
+    for fx in ("rasp", "boom", "hollow"):
+        y = voices.texture(x, fx)
+        assert len(y) == len(x) and np.max(np.abs(y)) <= 0.5001 and not np.allclose(y, x)
+
+
+def test_an_explicit_speaker_beats_the_previous_one():
+    text = ('"Shinies!" the goblin screeches. "Quiet, runt," the orc growls.')
+    assert [s for _, s in voices.segments(text, []) if s] == ["the goblin", "the orc"]

@@ -35,6 +35,18 @@ FEMALE = ["af_heart", "af_bella", "af_nicole", "af_sarah", "af_sky", "af_nova", 
 MALE = ["am_adam", "am_michael", "am_fenrir", "am_eric", "am_liam", "am_onyx", "am_echo", "am_puck",
         "bm_george", "bm_lewis", "bm_daniel", "bm_fable"]
 # words in a character's description → a pitch nudge in semitones, and a speed nudge
+# Creatures sound like what they are: (words, voices to draw from, pitch in semitones, speed, texture effect).
+# The first that matches wins; the pitch and speed replace the random ones (with a little variation kept).
+CREATURES = [
+    (r"\b(dragons?|wyrms?|wyverns?|drakes?)\b", ["am_onyx", "bm_george", "am_fenrir", "bm_lewis"], -5.0, 0.82, "boom"),
+    (r"\b(giants?|ogres?|trolls?|ettins?|golems?|titans?|treants?|ents?)\b", ["am_onyx", "am_fenrir", "bm_lewis"], -4.0, 0.84, None),
+    (r"\b(demons?|devils?|fiends?|balors?|pit fiend)\b", ["am_onyx", "bm_lewis", "am_fenrir"], -4.5, 0.86, "rasp"),
+    (r"\b(orcs?|orks?|half-orcs?|bugbears?|hobgoblins?|gnolls?|minotaurs?|worgs?)\b", ["am_fenrir", "am_onyx", "bm_lewis", "am_eric"], -2.5, 0.94, "rasp"),
+    (r"\b(liches?|wraiths?|ghosts?|spectres?|specters?|skeletons?|zombies?|vampires?|banshees?|undead|revenants?)\b",
+     ["bm_lewis", "am_echo", "bf_isabella", "bm_daniel"], -2.0, 0.85, "hollow"),
+    (r"\b(goblins?|kobolds?|imps?|gremlins?|quasits?|mephits?|boggles?)\b", ["am_puck", "af_sky", "am_echo", "af_nicole"], 4.0, 1.12, "rasp"),
+    (r"\b(pixies?|sprites?|fair(?:y|ies)|faeries?|fae|will-o'?-wisps?)\b", ["af_sky", "af_nicole", "af_aoede", "af_jessica"], 5.0, 1.12, None),
+]
 FLAVOUR = [(r"\b(dwarf|dwarven|goliath|giant|ogre|orc|half-orc|minotaur|troll|bear|worg)\b", -3.0, -0.04),
            (r"\b(old|elder|ancient|crone|aged|grandmother|grandfather)\b", -1.0, -0.1),
            (r"\b(halfling|gnome|gnomish|kobold|goblin|pixie|sprite|child|boy|girl|kid)\b", 3.0, 0.06),
@@ -113,11 +125,44 @@ def _find_name(text: str, idx: dict[str, str], last: bool) -> str | None:
     return hits[-1][2] if last else hits[0][2]
 
 
+FEMALE_WORDS = (
+    "she her hers herself woman women lady ladies queen princess duchess baroness countess empress mother mom mum "
+    "sister daughter girl wife widow bride aunt niece grandmother granny matron dame madam madame mistress maiden "
+    "maid nun abbess priestess stewardess waitress hostess actress heiress sorceress enchantress witch hag crone "
+    "goddess huntress seamstress governess lass fishwife alewife barmaid milkmaid matriarch"
+).split()
+MALE_WORDS = (
+    "he him his himself man men lord king prince duke baron count earl emperor father dad son brother boy husband "
+    "widower groom uncle nephew grandfather grandpa sir mister master monk abbot friar priest steward waiter host "
+    "actor heir sorcerer enchanter wizard warlock god huntsman lad fisherman alderman nobleman gentleman squire "
+    "knight patriarch bishop innkeeper's"
+).split()
+_F = re.compile(r"\b(" + "|".join(map(re.escape, FEMALE_WORDS)) + r")\b")
+_M = re.compile(r"\b(" + "|".join(map(re.escape, MALE_WORDS)) + r")\b")
+SPEECH = (r"(?:says|said|asks|asked|whispers|whispered|shouts|shouted|calls|called|mutters|muttered|replies|"
+          r"rumbles|rumbled|roars|roared|snarls|snarled|screeches|screeched|cackles|cackled|grunts|grunted|"
+          r"shrieks|shrieked|moans|moaned|intones|intoned|booms|boomed|giggles|giggled|chuckles|chuckled|"
+          r"sneers|sneered|sighs|sighed|gasps|gasped|drawls|drawled|spits|spat|wheezes|wheezed|squeaks|squeaked|"
+          r"replied|snaps|snapped|growls|growled|hisses|hissed|answers|answered|adds|added|laughs|laughed|sobs|"
+          r"sobbed|murmurs|murmured|barks|barked|cries|cried|yells|yelled|croaks|croaked|purrs|purred|rasps|rasped)")
+
+
 def _gender(about: str) -> str | None:
+    """'she', 'he' or None from the words used about someone (pronouns and gendered roles: steward/stewardess)."""
     a = about.lower()
-    she = len(re.findall(r"\b(she|her|hers|woman|lady|queen|mother|sister|girl|wife|matron|dame)\b", a))
-    he = len(re.findall(r"\b(he|him|his|man|lord|king|father|brother|boy|husband|sir)\b", a))
+    she, he = len(_F.findall(a)), len(_M.findall(a))
     return "she" if she > he else "he" if he > she else None
+
+
+def role_speaker(text: str) -> str | None:
+    """An unnamed speaker by role: '…," the steward says' / 'the old woman whispers' → 'the steward'."""
+    t = text.lower()
+    m = re.search(r"\b(?:the|a|an)\s+((?:[a-z'\-]+\s+){0,2}[a-z'\-]+)\s+" + SPEECH + r"\b", t) or \
+        re.search(SPEECH + r"\s+(?:the|a|an)\s+((?:[a-z'\-]+\s+){0,2}[a-z'\-]+)", t)
+    if not m:
+        return None
+    role = re.sub(r"\b(softly|quietly|loudly|again|then|now|finally)\b", "", m.group(1)).strip()
+    return f"the {role}" if role and role not in ("voice", "one", "other", "same") else None
 
 
 def _by_pronoun(earlier: str, pronoun: str, idx: dict[str, str], about: dict[str, str]) -> str | None:
@@ -152,12 +197,14 @@ def segments(text: str, names: list[str], about: dict[str, str] | None = None) -
             lead = pieces[-1] if pieces else ""
             # '…," Vane says' names the speaker; in the sentence before a quote, whoever acts first speaks
             # ("Vane walks backward to grin at Teft. 'Stay close…'")
-            who = _find_name(after, idx, last=False) or _find_name(lead, idx, last=False)
+            who = _find_name(after, idx, last=False) or role_speaker(after) or _find_name(lead, idx, last=False)
             if not who and last_speaker and len(before.strip()) < 40:
                 who = last_speaker  # a second quote straight after the first: the same person goes on
             pron = re.search(r"\b(he|she)\b", after, re.I)
             if not who and pron:
                 who = _by_pronoun(para[:m.start()], pron.group(1).lower(), idx, about) or last_speaker
+            if not who:
+                who = role_speaker(lead)
             speaker = who or "?"
             last_speaker = who or last_speaker
             out.append((m.group(1).strip(), speaker))
@@ -180,9 +227,8 @@ def recipe_for(name: str, about: str = "") -> dict:
     """A stable voice for a speaker: a blend of two voices of the likely gender, plus speed and pitch."""
     h = int(hashlib.sha1(name.lower().encode()).hexdigest(), 16)
     a = about.lower()
-    she = len(re.findall(r"\b(she|her|hers|woman|lady|queen|mother|sister|girl|wife|matron|dame)\b", a))
-    he = len(re.findall(r"\b(he|him|his|man|lord|king|father|brother|boy|husband|sir)\b", a))
-    pool = FEMALE if she > he else MALE if he > she else (FEMALE if h % 2 else MALE)
+    g = _gender(f"{name} {about}")
+    pool = FEMALE if g == "she" else MALE if g == "he" else (FEMALE if h % 2 else MALE)
     v1 = pool[h % len(pool)]
     v2 = pool[(h >> 8) % len(pool)]
     if v2 == v1:
@@ -190,6 +236,19 @@ def recipe_for(name: str, about: str = "") -> dict:
     w = 0.6 + ((h >> 16) % 30) / 100  # 0.60–0.89 of the first voice
     speed = 0.9 + ((h >> 24) % 22) / 100  # 0.90–1.11
     pitch = ((h >> 32) % 41) / 10 - 2.0  # −2.0…+2.0 semitones
+    creature = next((c for c in CREATURES if re.search(c[0], f"{name} {a}".lower())), None)
+    if creature:
+        _, cpool, cpitch, cspeed, fx = creature
+        v1, v2 = cpool[h % len(cpool)], cpool[(h >> 8) % len(cpool)]
+        if v2 == v1:
+            v2 = cpool[(h % len(cpool) + 1) % len(cpool)]
+        pitch = cpitch + (pitch / 4)  # mostly the creature's pitch, a touch of the individual
+        speed = cspeed + (speed - 1) / 3
+        r = {"mix": [[v1, round(w, 2)], [v2, round(1 - w, 2)]], "speed": round(max(0.7, min(1.3, speed)), 2),
+             "pitch": round(max(-6.0, min(6.0, pitch)), 1)}
+        if fx:
+            r["fx"] = fx
+        return r
     for pat, dp, ds in FLAVOUR:
         if re.search(pat, a):
             pitch += dp
@@ -212,13 +271,45 @@ def _shift(samples: np.ndarray, factor: float) -> np.ndarray:
     return np.interp(x, np.arange(len(samples)), samples).astype(np.float32)
 
 
+def texture(samples: np.ndarray, fx: str | None) -> np.ndarray:
+    """A voice's grain, added after speech is made: rasp (an orc's gravel, a goblin's screech), boom (a dragon's
+    weight) or hollow (an undead echo)."""
+    if not fx or len(samples) < 64:
+        return samples
+    x = samples.astype(np.float32)
+    peak = float(np.max(np.abs(x))) or 1.0
+    if fx == "rasp":
+        # soft saturation for grit, plus a fast flutter in loudness (vocal fry)
+        drive = np.tanh(x / peak * 4.0) * peak
+        t = np.arange(len(x)) / SR
+        flutter = 1.0 - 0.18 * (0.5 + 0.5 * np.sin(2 * np.pi * 38 * t))
+        rng = np.random.default_rng(len(x))
+        grit = rng.normal(0, 0.012, len(x)).astype(np.float32) * np.abs(x) / peak
+        out = (0.55 * x + 0.45 * drive) * flutter + grit
+    elif fx == "boom":
+        # weight: a little drive and a low, slow rumble under the voice
+        drive = np.tanh(x / peak * 2.0) * peak
+        k_ = int(SR * 0.0025)
+        body = np.convolve(drive, np.ones(k_) / k_, mode="same")  # the low end, boosted
+        out = 0.6 * drive + 0.7 * body
+    elif fx == "hollow":
+        # a short, dim echo: the voice from inside a tomb
+        out = x.copy()
+        for delay, gain in ((0.045, 0.45), (0.11, 0.3), (0.19, 0.18)):
+            d = int(SR * delay)
+            out[d:] += gain * x[:-d]
+    else:
+        return samples
+    return (out / (float(np.max(np.abs(out))) or 1.0) * peak).astype(np.float32)
+
+
 def speak(k, text: str, recipe: dict) -> np.ndarray:
     """Kokoro speech for one line in a recipe. Pitch without changing speed: synthesise slower by the pitch
-    factor, then resample back up."""
+    factor, then resample back up; then the recipe's texture, if any."""
     f = 2 ** (float(recipe.get("pitch", 0)) / 12)
     speed = float(recipe.get("speed", 1.0)) / f
     samples, _ = k.create(text, voice=_style(k, recipe["mix"]), speed=max(0.5, min(2.0, speed)), lang="en-us")
-    return _shift(np.asarray(samples, dtype=np.float32), f)
+    return texture(_shift(np.asarray(samples, dtype=np.float32), f), recipe.get("fx"))
 
 
 def to_mp3(samples: np.ndarray) -> bytes:
@@ -270,8 +361,11 @@ def recipe(ctx, name: str | None, about: dict[str, str], narration: str) -> dict
     voices = ctx.state.setdefault("voices", {})
     key = name.lower()
     if key not in voices:
-        near = " ".join(s for s in re.split(r"(?<=[.!?])\s", narration) if name.split()[-1] in s)
-        voices[key] = recipe_for(name, f"{about.get(name, '')} {near}")
+        if name.startswith("the ") and name not in about:  # an unnamed speaker known by role: "the steward"
+            voices[key] = recipe_for(name, name)
+        else:
+            near = " ".join(s for s in re.split(r"(?<=[.!?])\s", narration) if name.split()[-1] in s)
+            voices[key] = recipe_for(name, f"{about.get(name, '')} {near}")
     return voices[key]
 
 
@@ -323,3 +417,12 @@ async def voice_narration(game_id: str, log_id: int) -> None:
     finally:
         db.close()
     await changed(game_id, [])
+
+
+def suggest(text: str) -> dict:
+    """A fresh random recipe for whoever speaks in `text` (Settings → Surprise me): the gender comes from how they
+    are described outside the quotes ('the steward says' → male), the rest is random."""
+    import secrets
+    outside = re.sub(r'"[^"]*"', " ", _clean(text))
+    who = role_speaker(outside) or ""
+    return recipe_for(secrets.token_hex(6), f"{who} {outside}")

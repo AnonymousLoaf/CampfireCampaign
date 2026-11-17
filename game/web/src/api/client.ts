@@ -89,7 +89,9 @@ export const api = {
   setXaiKey: (key: string) => put<Me>("/me/xai-key", { key }),
   removeXaiKey: () => del<Me>("/me/xai-key"),
   voices: () => get<{ available: boolean; voices: string[] }>("/voices"),
-  testVoice: async (body: { text: string; voice: string; blend?: string | null; blend_weight?: number; speed: number; pitch: number }) => {
+  suggestVoice: (text: string) =>
+    post<{ voice: string; blend: string | null; blend_weight: number; speed: number; pitch: number; fx: string | null }>("/voices/suggest", { text }),
+  testVoice: async (body: { text: string; voice: string; blend?: string | null; blend_weight?: number; speed: number; pitch: number; fx?: string | null }) => {
     const r = await fetch("/api/voices/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), credentials: "include" });
     if (!r.ok) throw new Error((await r.json().catch(() => null))?.detail ?? `the server said ${r.status}`);
     return r.blob();
