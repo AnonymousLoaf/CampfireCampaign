@@ -435,3 +435,189 @@
     max-width: calc(100% - 16px);
   }
 }
+
+/* ── phone layout, round 2: give the story the screen ─────────── */
+.header-more {
+  display: none;
+}
+@media (max-width: 760px) {
+  .game-screen.mobile .game-header {
+    position: relative;
+    flex-wrap: wrap;
+    align-items: center;
+    padding: 6px 8px;
+    row-gap: 2px;
+  }
+  .game-screen.mobile .game-title {
+    flex: 1;
+    min-width: 0;
+  }
+  .game-screen.mobile .game-title h1 {
+    font-size: 1.05rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin: 0;
+  }
+  .game-screen.mobile .game-title .muted {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 0.75rem;
+  }
+  .game-screen.mobile .phase-cluster {
+    order: 3;
+    width: 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 6px;
+    font-size: 0.8rem;
+  }
+  .game-screen.mobile .header-more {
+    display: inline-flex;
+    order: 2;
+  }
+  /* collapsed: only the must-have buttons (Start game, Retry DM) stay in the header */
+  .game-screen.mobile .header-actions:not(.open) {
+    order: 4;
+    width: auto;
+    overflow: visible;
+    padding: 0;
+  }
+  .game-screen.mobile .header-actions:not(.open) > :not(.keep) {
+    display: none;
+  }
+  .game-screen.mobile .header-actions.open {
+    position: absolute;
+    top: 100%;
+    right: 8px;
+    left: auto;
+    width: auto;
+    max-width: calc(100vw - 16px);
+    z-index: 60;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding: 10px;
+    background: rgba(19, 16, 13, 0.98);
+    border: 1px solid var(--border-2);
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    overflow: visible;
+  }
+  .game-screen.mobile .header-actions.open .popover {
+    position: static;
+  }
+
+  .game-screen.mobile .feed-tabs {
+    align-items: center;
+  }
+  .feed-tab-tools {
+    margin-left: auto;
+    display: inline-flex;
+    gap: 6px;
+    padding-right: 6px;
+  }
+  .feed-tab-tools .autoread-toggle,
+  .feed-tab-tools .sound-chip {
+    padding: 2px 8px;
+    min-height: 30px;
+    font-size: 0.9rem;
+  }
+
+  /* the action box: a bar until opened */
+  .mobile-composer {
+    max-height: none;
+  }
+  .mobile-composer.open {
+    max-height: 62dvh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .mobile-composer.open > .composer {
+    overflow-y: auto;
+    min-height: 0;
+  }
+  .composer-handle {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 30px;
+    background: none;
+    border: none;
+    color: var(--muted, #b9ad98);
+    font: inherit;
+    font-size: 0.75rem;
+    cursor: pointer;
+  }
+  .composer-handle .grip {
+    width: 36px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border-2);
+  }
+  .composer-bar {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 52px;
+    padding: 8px 12px;
+    background: rgba(19, 16, 13, 0.96);
+    border: none;
+    color: var(--text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .composer-bar-text {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 0.92rem;
+  }
+  .composer-bar-btn {
+    flex-shrink: 0;
+    padding: 6px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--border-2);
+    font-weight: 600;
+    font-size: 0.88rem;
+  }
+  .composer-bar.urgent {
+    background: linear-gradient(90deg, rgba(216, 169, 74, 0.18), rgba(19, 16, 13, 0.96));
+  }
+  .composer-bar.urgent .composer-bar-text {
+    color: var(--gold-2);
+    font-weight: 600;
+  }
+  .composer-bar.urgent .composer-bar-btn {
+    background: var(--gold);
+    border-color: var(--gold);
+    color: #1a1612;
+  }
+}
+
+.menu-label {
+  display: none;
+}
+@media (max-width: 760px) {
+  .game-screen.mobile .header-actions.open .menu-label {
+    display: inline;
+  }
+  .game-screen.mobile .header-actions.open .icon-btn {
+    width: auto;
+    justify-content: flex-start;
+    padding: 6px 10px;
+  }
+  .game-screen.mobile .travel-hint {
+    display: none;
+  }
+}

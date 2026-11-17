@@ -10,6 +10,7 @@ export default function GameHeader({ onSettings, onTv }: { onSettings: () => voi
   const { view, gameId, run } = useGame();
   const now = useNow(1000);
   const [liveMenu, setLiveMenu] = useState(false);
+  const [more, setMore] = useState(false); // phones: the header's extra buttons
   const p = view.phase;
   const s = view.game.settings;
   const host = view.me.is_host;
@@ -50,7 +51,10 @@ export default function GameHeader({ onSettings, onTv }: { onSettings: () => voi
         )}
       </div>
 
-      <div className="header-actions">
+      <button className="icon-btn header-more" aria-expanded={more} title="More" onClick={() => setMore((v) => !v)}>
+        ⋯
+      </button>
+      <div className={`header-actions ${more ? "open" : ""}`}>
         {view.game.status === "lobby" && (
           <span className="invite">
             Invite code <code className="code big">{view.game.invite_code}</code>
@@ -59,7 +63,7 @@ export default function GameHeader({ onSettings, onTv }: { onSettings: () => voi
         {view.game.status === "lobby" && view.me.role !== "spectator" && <InviteByEmail gameId={gameId} />}
         {view.game.status === "lobby" && (host ? <PlotPicker /> : view.has_plot && <span className="badge" title="The host wrote this campaign's story. Only the DM knows it.">📜 Custom plot</span>)}
         {host && view.game.status === "lobby" && (
-          <button className="btn primary" onClick={() => void run(() => api.start(gameId))}>
+          <button className="btn primary keep" onClick={() => void run(() => api.start(gameId))}>
             Start game
           </button>
         )}
@@ -100,7 +104,7 @@ export default function GameHeader({ onSettings, onTv }: { onSettings: () => voi
           </div>
         )}
         {host && p.error && (
-          <button className="btn danger small" onClick={() => void run(() => api.retryDm(gameId))} title={p.error}>
+          <button className="btn danger small keep" onClick={() => void run(() => api.retryDm(gameId))} title={p.error}>
             Retry DM
           </button>
         )}
@@ -121,7 +125,7 @@ export default function GameHeader({ onSettings, onTv }: { onSettings: () => voi
               📺 TV view
             </button>
             <button className="icon-btn" onClick={onSettings} title="Game settings">
-              ⚙
+              ⚙<span className="menu-label"> Settings</span>
             </button>
           </>
         )}
