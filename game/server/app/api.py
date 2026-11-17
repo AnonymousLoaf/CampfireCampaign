@@ -607,6 +607,8 @@ async def attach_custom(cid: str, body: AttachBody, u: User = Depends(current_us
 async def detach_custom(cid: str, entry_id: str, u: User = Depends(current_user)):
     def fn(sheet: dict) -> None:
         before = len(sheet.get("custom", []))
+        if any(c.get("entry_id") == entry_id and c.get("source") == "dm" for c in sheet.get("custom", [])):
+            raise RulesError("the DM gave that one: it goes away only in the story")
         sheet["custom"] = [c for c in sheet.get("custom", []) if c.get("entry_id") != entry_id]
         if len(sheet["custom"]) == before:
             raise RulesError("that isn't on this character")

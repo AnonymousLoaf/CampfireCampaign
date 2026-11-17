@@ -71,6 +71,12 @@ def detect_ruleset(d: dict) -> str:
     return "2014"
 
 
+# D&D Beyond marks placeholder "feats" with these: a campaign's optional rules ("Hero's Journey Boon", "Dark Bargain",
+# "Faction Renown" — reminders that grant nothing until a DM does) and background ability-score bookkeeping. They
+# aren't imported, so joining through D&D Beyond gives no head start: the DM hands out boons in play (grant_boon).
+PLACEHOLDER_TAGS = {"__DISGUISE_FEAT", "__INITIAL_ASI"}
+
+
 def _ddb_features(d: dict, main_class: dict | None) -> list[dict]:
     """Every named feature on the D&D Beyond sheet: class/subclass features, feats, species traits, background feature."""
     out: list[dict] = []
@@ -84,6 +90,9 @@ def _ddb_features(d: dict, main_class: dict | None) -> list[dict]:
                             "level": req or None})
     for f in d.get("feats") or []:
         df = f.get("definition") or {}
+        tags = {c.get("tagName") for c in df.get("categories") or [] if isinstance(c, dict)}
+        if tags & PLACEHOLDER_TAGS:  # not a real feat: a campaign's optional-rule reminder or ASI bookkeeping
+            continue
         if df.get("name"):
             out.append({"kind": "feat", "name": df["name"], "description": _text(df.get("description")), "level": None})
     for t in (d.get("race") or {}).get("racialTraits") or []:

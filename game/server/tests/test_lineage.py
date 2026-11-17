@@ -100,3 +100,51 @@ def test_import_drops_entries_that_repeat_the_rules_and_keeps_real_extras():
     assert "Dark Bargain" in kept and "Starlit Grace" in kept
     assert not kept & {"Size", "Speed", "Creature Type", "Fey Ancestry", "Elven Lineage Spells",
                        "Soldier Ability Score Improvements"}
+
+
+def test_ddb_placeholder_feats_are_not_imported():
+    d = _ddb_json(legacy=False)
+    ph = {"categories": [{"tagName": "__DISGUISE_FEAT"}, {"tagName": "__DISPLAY_WITH_DATA_ORIGIN"}]}
+    d["feats"] = [{"definition": {"name": "Hero's Journey Boon", "description": "<p>At your GM's discretion…</p>", **ph}},
+                  {"definition": {"name": "Faction Renown", "description": "<p>Azeroth is defined by…</p>", **ph}},
+                  {"definition": {"name": "Polearm Master", "description": "<p>Bonus attack.</p>",
+                                  "categories": [{"tagName": "General"}]}}]
+    kept = {c["name"] for c in ddb.to_sheet(d)["custom"]}
+    assert "Polearm Master" in kept and not kept & {"Hero's Journey Boon", "Faction Renown"}
+
+
+def test_dm_grants_boons_players_cannot_detach_them():
+    from fastapi.testclient import TestClient
+
+    from app.db import SessionLocal
+    from app.dm.tools import ToolBox
+    from app.game.state import load
+    from app.main import app
+
+    from .test_chat import _character, _client
+
+    with TestClient(app):
+        host = _client("boonhost")
+        cid = _character(host, "Teft")
+        gid = host.post("/api/games", json={"name": "B", "character_id": cid, "settings": {"ruleset": "2024"}}).json()["id"]
+        db = SessionLocal()
+        try:
+            ctx = load(db, gid)
+            tb = ToolBox(ctx)
+            assert tb.call("grant_boon", {"character": "Teft", "kind": "dark_bargain", "name": "The Caretaker's Lantern",
+                                          "description": "See in magical darkness; the Caretaker always knows where you are."}).startswith("Granted")
+            assert tb.call("grant_boon", {"character": "Teft", "kind": "renown", "name": "Blue-coats",
+                                          "description": "1: Vane owes you"}).startswith("Granted")
+            assert tb.call("grant_boon", {"character": "Teft", "kind": "renown", "name": "Blue-coats",
+                                          "description": "2: Vane owes you twice"}).startswith("Updated")
+            names = [c["name"] for c in ctx.chars[cid]["custom"]]
+            assert names == ["Dark Bargain: The Caretaker's Lantern", "Renown: Blue-coats"]
+            ctx.save()
+            db.commit()
+        finally:
+            db.close()
+        sheet = host.get(f"/api/games/{gid}/view").json()["characters"][cid]
+        entry = next(c for c in sheet["custom"] if c["name"] == "Renown: Blue-coats")
+        assert entry["source"] == "dm" and "twice" in entry["description"]
+        r = host.delete(f"/api/characters/{cid}/custom/{entry['entry_id']}")
+        assert r.status_code == 400 and "DM" in r.text
