@@ -33,7 +33,7 @@ export default function AuthScreen({ onSignedIn }: { onSignedIn: (me: Me) => voi
       <div className="auth-card">
         <div className="brand">
           <span className="brand-sigil">⚔</span>
-          <h1>Async D&amp;D</h1>
+          <h1>Campfire Campaign</h1>
           <p className="muted">A campaign that keeps going — play together, or on your own time.</p>
         </div>
         <div className="tabs">

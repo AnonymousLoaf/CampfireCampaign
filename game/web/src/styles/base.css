@@ -854,3 +854,32 @@ label > textarea {
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* phones: the top bar keeps the name, the settings gear and sign out */
+.settings-who {
+  display: none;
+}
+@media (max-width: 600px) {
+  .topbar {
+    gap: 8px;
+  }
+  .topbar .brand-inline {
+    font-size: 1rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+  .topbar-right {
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  .topbar .signed-in,
+  .topbar .topbar-label {
+    display: none;
+  }
+  .settings-who {
+    display: block;
+    grid-column: 1 / -1;
+  }
+}

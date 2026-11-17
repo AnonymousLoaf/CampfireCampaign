@@ -253,7 +253,8 @@ function XaiKeySettings({ me, onMeChange }: { me: Me; onMeChange: (m: Me) => voi
     <>
       <h3>Grok (xAI) API key</h3>
       <p className="muted small">
-        Stored encrypted on the server and never shown again, only the last 4 characters. Nothing in the game uses it yet.
+        Games you host use it to paint scenes, monsters and NPCs, and you can paint character portraits with it. Stored
+        encrypted on the server and never shown again, only the last 4 characters.
       </p>
       {me.has_xai_key ? (
         <div className="row gap center">

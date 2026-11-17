@@ -1,4 +1,4 @@
-/* Async D&D service worker: shows push notifications and opens the game when one is clicked. */
+/* Campfire Campaign service worker: shows push notifications and opens the game when one is clicked. */
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
@@ -8,9 +8,9 @@ self.addEventListener("push", (event) => {
   try {
     data = event.data ? event.data.json() : {};
   } catch (e) {
-    data = { title: "Async D&D", body: event.data ? event.data.text() : "" };
+    data = { title: "Campfire Campaign", body: event.data ? event.data.text() : "" };
   }
-  const title = data.title || "Async D&D";
+  const title = data.title || "Campfire Campaign";
   const options = {
     body: data.body || "",
     icon: "/favicon.svg",

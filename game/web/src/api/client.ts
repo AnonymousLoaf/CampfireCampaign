@@ -88,6 +88,7 @@ export const api = {
   removeApiKey: () => del<Me>("/me/api-key"),
   setXaiKey: (key: string) => put<Me>("/me/xai-key", { key }),
   removeXaiKey: () => del<Me>("/me/xai-key"),
+  clientLog: (kind: string, message: string) => post<Ok>("/client-log", { kind, message: message.slice(0, 500) }),
   generatePortrait: (characterId: string, notes: string) =>
     post<CharacterView>(`/characters/${characterId}/portrait/generate`, { notes }),
   meta: () => get<Meta>("/meta"),

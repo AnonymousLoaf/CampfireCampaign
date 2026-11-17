@@ -15,6 +15,6 @@ export default defineConfig({
   },
   build: {
     outDir: "dist",
-    emptyOutDir: true,
+    emptyOutDir: false, // keep earlier builds' files so pages opened before an update still load (see scripts/prune-assets.mjs)
   },
 });

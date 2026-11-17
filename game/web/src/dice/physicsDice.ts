@@ -403,7 +403,7 @@ export class DiceTable {
 
     // ── play it back ──
     const place = (fi: number) => {
-      const f = frames[Math.min(frames.length - 1, fi)];
+      const f = frames[Math.max(0, Math.min(frames.length - 1, fi))];
       this.meshes.forEach((m, i) => {
         m.position.set(f[i].p[0], f[i].p[1], f[i].p[2]);
         m.quaternion.set(f[i].q[0], f[i].q[1], f[i].q[2], f[i].q[3]);
@@ -431,20 +431,62 @@ export class DiceTable {
       place(frames.length - 1);
       return Promise.resolve(settle());
     }
-    return new Promise((resolve) => {
-      const t0 = performance.now();
-      const tick = (now: number) => {
-        if (this.disposed) return;
-        const fi = Math.floor(((now - t0) / 1000) * 60);
-        place(fi);
-        if (fi >= frames.length - 1) {
+    return new Promise((resolve, reject) => {
+      // The clock starts at the first frame we draw: a frame's timestamp can be a little earlier than
+      // performance.now() was when the throw began, and a negative time must never index the recording.
+      let t0: number | null = null;
+      let done = false;
+      const end = () => {
+        if (done) return;
+        done = true;
+        window.clearTimeout(guard);
+        cancelAnimationFrame(this.raf);
+        try {
+          place(frames.length - 1);
           resolve(settle());
-          return;
+        } catch (e) {
+          reject(e);
         }
-        this.raf = requestAnimationFrame(tick);
+      };
+      // Whatever happens to the animation (a hidden tab, a GPU hiccup), the roll always finishes.
+      const guard = window.setTimeout(end, (frames.length / 60) * 1000 + 2500);
+      const tick = (now: number) => {
+        if (this.disposed || done) return;
+        try {
+          if (t0 === null) t0 = now;
+          const fi = Math.max(0, Math.floor(((now - t0) / 1000) * 60));
+          place(fi);
+          if (fi >= frames.length - 1) return end();
+          this.raf = requestAnimationFrame(tick);
+        } catch (e) {
+          done = true;
+          window.clearTimeout(guard);
+          reject(e);
+        }
       };
       this.raf = requestAnimationFrame(tick);
     });
+  }
+
+  /** Do the slow first-time work ahead of a roll: build every die shape, its physics hull, and compile the
+   * shaders (the first frame drawn with a new material is the expensive one). Leaves the table empty. */
+  warmUp(): void {
+    const r = this.dieRadius();
+    const sides: Sides[] = [4, 6, 8, 10, 12, 20];
+    const meshes = sides.map((s) => {
+      const d = this.shape(s, r);
+      const n = s === 4 ? d.verts.length : d.faces.length;
+      const m = new THREE.Mesh(d.geometry, dieMaterials(d, Array.from({ length: n }, (_, k) => k + 1), "#777777"));
+      m.castShadow = true;
+      m.position.set(0, -40, 0); // below the floor: compiled, never seen
+      this.scene.add(m);
+      return m;
+    });
+    this.renderer.compile(this.scene, this.camera);
+    this.renderer.render(this.scene, this.camera);
+    // Keep them (hidden): disposing their materials would release the compiled shaders the real dice reuse.
+    for (const m of meshes) m.visible = false;
+    this.renderer.render(this.scene, this.camera);
   }
 
   dispose(): void {
@@ -459,7 +501,7 @@ export class DiceTable {
 export function webglAvailable(): boolean {
   try {
     const c = document.createElement("canvas");
-    return !!(c.getContext("webgl2") || c.getContext("webgl"));
+    return !!c.getContext("webgl2"); // three.js needs WebGL 2
   } catch {
     return false;
   }

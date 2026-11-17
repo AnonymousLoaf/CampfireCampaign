@@ -1057,3 +1057,16 @@
 .dice-caption .dice-total {
   font-size: 1.15rem;
 }
+
+/* settings page: test dice */
+.dice-tray .field {
+  margin-bottom: 10px;
+}
+.dice-tray-count {
+  min-width: 2ch;
+  text-align: center;
+  font-size: 1.2rem;
+}
+.dice-tray .toggle {
+  margin-top: 12px;
+}

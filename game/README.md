@@ -1,4 +1,4 @@
-# Async D&D — the web game (M1)
+# Campfire Campaign — the web game
 
 A browser D&D 5e game with an AI Dungeon Master that a party plays **on their own time** (each round has a deadline from 5 minutes to 5 days) or **live around one screen**. Design: [docs/game/DESIGN.md](../docs/game/DESIGN.md). API: [docs/game/API.md](../docs/game/API.md).
 
@@ -112,7 +112,7 @@ $env:GAME_SMTP_HOST = "smtp.example.com"   # your mail provider's SMTP server
 $env:GAME_SMTP_PORT = "587"
 $env:GAME_SMTP_USER = "you@example.com"
 $env:GAME_SMTP_PASSWORD = "app-password"
-$env:GAME_SMTP_FROM = "Async D&D <you@example.com>"
+$env:GAME_SMTP_FROM = "Campfire Campaign <you@example.com>"
 $env:GAME_PUBLIC_URL = "https://your-game-address"   # so emails can link back to the game
 ```
 

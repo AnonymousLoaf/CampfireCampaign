@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { getPrefs, prefersReducedMotion } from "../util/prefs";
 import type { DiceTable, DieSpec, Sides } from "../dice/physicsDice";
+import { api } from "../api/client";
+
+/** Tell the server when the dice fail on a device, so problems nobody can see from here get fixed. */
+function report(kind: string, message = ""): void {
+  api.clientLog(`dice:${kind}`, message).catch(() => undefined);
+}
 
 export interface DiceShow {
   /** "attack" shows Hit/Miss instead of Success/Failure; "damage" / "heal" are plain totals of any dice. */
@@ -22,6 +28,21 @@ export interface DiceShow {
 }
 
 const subs = new Set<(d: DiceShow) => void>();
+
+/** Why the 3D dice couldn't run on this device (null = they work, or haven't been tried yet). */
+let diceProblem: string | null = null;
+const problemSubs = new Set<(p: string | null) => void>();
+export function getDiceProblem(): string | null {
+  return diceProblem;
+}
+export function onDiceProblem(fn: (p: string | null) => void): () => void {
+  problemSubs.add(fn);
+  return () => problemSubs.delete(fn);
+}
+function setDiceProblem(p: string | null) {
+  diceProblem = p;
+  problemSubs.forEach((f) => f(p));
+}
 
 /** Queue a roll: real 3D dice are thrown across the screen for everyone and land on the server's results. */
 export function showDice(d: DiceShow): void {
@@ -82,6 +103,37 @@ export default function DiceRoller({ variant = "game" }: { variant?: "game" | "t
   const n = useRef(0);
   const busy = useRef(false);
   const hold = useRef<number>(0);
+  const ready = useRef<Promise<DiceTable> | null>(null);
+
+  /** The 3D table, loaded and warmed up once (shared by the background preload and the first roll). */
+  const ensureTable = (): Promise<DiceTable> => {
+    if (!ready.current) {
+      ready.current = (async () => {
+        const mod = await import("../dice/physicsDice");
+        if (!mod.webglAvailable()) throw new Error("this browser has no WebGL 2 (3D graphics) — try updating it, or turning on hardware acceleration");
+        if (!host.current) throw new Error("the dice layer isn't on the page");
+        const t = new mod.DiceTable(host.current);
+        t.warmUp();
+        table.current = t;
+        setDiceProblem(null);
+        return t;
+      })();
+      ready.current.catch((e) => {
+        const msg = e instanceof Error ? e.message : String(e);
+        report("error", e instanceof Error ? `${e.name}: ${msg}` : msg);
+        // "Importing a module script failed" / "Failed to fetch dynamically imported module": this page is
+        // older than the site (it was updated since the page opened). Say so, and try again on the next roll.
+        if (/import|module|fetch|chunk/i.test(msg)) {
+          ready.current = null;
+          setDiceProblem("the game was updated since this page opened, so refresh the page to get the 3D dice");
+          return;
+        }
+        failed.current = true; // the 3D dice can't start here: just show results
+        setDiceProblem(msg);
+      });
+    }
+    return ready.current;
+  };
 
   const next = () => {
     window.clearTimeout(hold.current);
@@ -109,12 +161,18 @@ export default function DiceRoller({ variant = "game" }: { variant?: "game" | "t
       (window as unknown as { __showDice?: typeof showDice }).__showDice = showDice; // manual testing only
     const onResize = () => table.current?.resize();
     window.addEventListener("resize", onResize);
+    // Get the dice ready in the background shortly after the page opens, so the first roll isn't slow.
+    const pre = window.setTimeout(() => {
+      if (getPrefs().dice && !failed.current) ensureTable().catch(() => undefined);
+    }, 1200);
     return () => {
+      window.clearTimeout(pre);
       subs.delete(on);
       window.removeEventListener("resize", onResize);
       window.clearTimeout(hold.current);
       table.current?.dispose();
       table.current = null;
+      ready.current = null;
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -132,17 +190,13 @@ export default function DiceRoller({ variant = "game" }: { variant?: "game" | "t
     (async () => {
       if (!specs.length || failed.current || !host.current) return finish(centre());
       try {
-        if (!table.current) {
-          const mod = await import("../dice/physicsDice");
-          if (!mod.webglAvailable()) throw new Error("no WebGL");
-          if (!alive || !host.current) return;
-          table.current = new mod.DiceTable(host.current);
-        }
-        table.current.resize();
-        const still = prefersReducedMotion() && !new URLSearchParams(location.search).has("forcemotion");
-        finish(await table.current.throw(specs, still));
-      } catch {
-        failed.current = true; // no WebGL here: just show the result
+        const t = await ensureTable();
+        t.resize();
+        const still = prefersReducedMotion() && getPrefs().diceMotion !== "always"
+          && !new URLSearchParams(location.search).has("forcemotion");
+        finish(await t.throw(specs, still));
+      } catch (e) {
+        if (table.current) report("error", e instanceof Error ? `${e.name}: ${e.message} | ${(e.stack ?? "").slice(0, 300)}` : String(e));
         finish(centre());
       }
     })();

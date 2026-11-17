@@ -10,6 +10,7 @@ export interface DevicePrefs {
   voice: string; // voiceURI, "" = browser default English voice
   rate: number; // 0.6..1.6
   dice: boolean; // animated dice overlay
+  diceMotion: "auto" | "always"; // "always": roll the dice even when the device asks for reduced motion
   soundOn: boolean; // the player switched sound on (browsers still need a tap each visit)
 }
 
@@ -23,6 +24,7 @@ const DEFAULTS: DevicePrefs = {
   voice: "",
   rate: 1,
   dice: true,
+  diceMotion: "auto",
   soundOn: false,
 };
 
