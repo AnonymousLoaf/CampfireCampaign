@@ -212,17 +212,22 @@ TOOLS: list[dict] = [
              "name": {"type": "string"}, "x": {"type": "integer"}, "y": {"type": "integer"},
              "hostile": {"type": "boolean"}}, "required": ["name", "x", "y"]}},
          "sight_ft": {"type": "integer", "minimum": 10, "maximum": 200,
-                      "description": "How far the party can see (their light or darkvision). Omit in daylight."}},
+                      "description": "How far the party can see (their light or darkvision). Omit in daylight."},
+         "characters": {"type": "array", "items": {"type": "string"},
+                        "description": "Split party only: names of the characters who are HERE, away from the rest. "
+                                       "This draws a separate map for them (the others keep theirs); everyone can "
+                                       "look at it. Omit for the map of the main group."}},
          "required": ["terrain", "rows", "party_at"]}},
     {"name": "update_scene_map",
      "description": "Change the scene map as the story moves: the party walks somewhere, one character splits off, "
                     "NPCs move, a door opens or a gap closes, a new feature is found. Call it whenever positions change "
                     "in your narration so the map (and your own sense of where everyone is) stays right.",
      "input_schema": {"type": "object", "properties": {
-         "party_at": {"type": "object", "properties": {"x": {"type": "integer"}, "y": {"type": "integer"}}, "required": ["x", "y"], "description": "The whole party moves here together"},
+         "map": {"type": "string", "description": "Split party: the title of the map to change (default: the main group's)"},
+         "party_at": {"type": "object", "properties": {"x": {"type": "integer"}, "y": {"type": "integer"}}, "required": ["x", "y"], "description": "The whole group on this map moves here together"},
          "characters": {"type": "array", "items": {"type": "object", "properties": {
              "name": {"type": "string"}, "x": {"type": "integer"}, "y": {"type": "integer"}},
-             "required": ["name", "x", "y"]}, "description": "Place individual player characters"},
+             "required": ["name", "x", "y"]}, "description": "Place individual player characters (placing someone on a map moves them onto it, e.g. when a split party regroups)"},
          "npcs": {"type": "array", "items": {"type": "object", "properties": {
              "name": {"type": "string"}, "x": {"type": "integer"}, "y": {"type": "integer"},
              "hostile": {"type": "boolean"}}, "required": ["name", "x", "y"]},
@@ -236,8 +241,11 @@ TOOLS: list[dict] = [
              "required": ["x", "y", "cell"]}, "description": "Change single squares, e.g. a door opening ('D' to '.')"}},
          "required": []}},
     {"name": "clear_scene_map",
-     "description": "Remove the scene map when the party leaves the area and the layout no longer matters.",
-     "input_schema": {"type": "object", "properties": {}, "required": []}},
+     "description": "Remove the scene map when the party leaves the area and the layout no longer matters. With a "
+                    "split party, name the map to remove just that one (its characters rejoin the main group's map).",
+     "input_schema": {"type": "object", "properties": {
+         "map": {"type": "string", "description": "Title of the one map to remove (default: all of them)"}},
+         "required": []}},
     {"name": "spotlight",
      "description": "Call when your narration ends on a question or decision for specific characters only (e.g. "
                     "\"Kira, now or never\"). Everyone is still asked to act, but the others see it as that "
@@ -750,7 +758,8 @@ class ToolBox:
         w = self.ctx.world
         if not w:
             raise RulesError("there is no world map yet")
-        self.ctx.state.pop("scene_map", None)  # leaving the area: the local map no longer applies
+        self.ctx.state.pop("scene_map", None)  # leaving the area: the local maps no longer apply
+        self.ctx.state.pop("side_maps", None)
         if not destination:
             if not direction:
                 raise RulesError("give a destination by name, or a direction and how many days")
@@ -784,25 +793,62 @@ class ToolBox:
             sc["time_of_day"] = time_of_day
         return "ok"
 
-    def _scene_done(self, sm: dict) -> str:
-        scenemap.refresh(sm, [cid for cid, _ in self.ctx.party()])
-        self.ctx.state["scene_map"] = sm
-        return "ok\n" + scenemap.describe(sm, self.ctx.party())
+    def _scene_done(self) -> str:
+        st = self.ctx.state
+        for _, sm, here in scenemap.maps_with_party(st, self.ctx.party()):
+            scenemap.refresh(sm, [cid for cid, _ in here])
+        return "ok\n" + self._describe_maps()
+
+    def _describe_maps(self) -> str:
+        out = []
+        for mid, sm, here in scenemap.maps_with_party(self.ctx.state, self.ctx.party()):
+            if mid != "main":
+                out.append(f"[Separate map: only {', '.join(s['name'] for _, s in here)} {'is' if len(here) == 1 else 'are'} here]")
+            out.append(scenemap.describe(sm, here))
+        return "\n".join(out)
+
+    def _find_map(self, name: str | None) -> tuple[str, dict]:
+        """('main' or a side map id, the map) by title; no title means the main group's map."""
+        st = self.ctx.state
+        if name:
+            key = name.strip().lower()
+            for m in st.get("side_maps") or []:
+                if m.get("title", "").lower() == key or (key and key in m.get("title", "").lower()):
+                    return m["id"], m
+            if st.get("scene_map") and key in (st["scene_map"].get("title", "").lower() or "\0"):
+                return "main", st["scene_map"]
+            titles = [m.get("title", "") for _, m, _ in scenemap.maps_with_party(st, self.ctx.party())]
+            raise RulesError(f"no scene map called {name!r} (maps: {', '.join(titles) or 'none'})")
+        if not st.get("scene_map"):
+            raise RulesError("there is no scene map for the main group; draw one with draw_scene_map")
+        return "main", st["scene_map"]
 
     def t_draw_scene_map(self, terrain: str, rows: list, party_at: dict, title: str = "", features: list | None = None,
-                         npcs: list | None = None, sight_ft: int | None = None) -> str:
+                         npcs: list | None = None, sight_ft: int | None = None, characters: list | None = None) -> str:
         try:
             sm = scenemap.draw(terrain, rows, party_at, features, npcs, sight_ft, title)
         except ValueError as e:
             raise RulesError(str(e))
-        return self._scene_done(sm)
+        st = self.ctx.state
+        if isinstance(characters, str):
+            characters = [characters]
+        here = {self._char(str(n))[0] for n in characters or []}
+        party = {cid for cid, _ in self.ctx.party()}
+        if here and here != party:  # a split: a map of its own for these characters
+            sm["id"] = "m" + uuid.uuid4().hex[:6]
+            sm["members"] = sorted(here)
+            scenemap.take_from_side_maps(st, here)
+            st["side_maps"] = (st.get("side_maps") or []) + [sm]
+        else:
+            if here == party:  # everyone together again
+                st.pop("side_maps", None)
+            st["scene_map"] = sm
+        return self._scene_done()
 
     def t_update_scene_map(self, party_at: dict | None = None, characters: list | None = None, npcs: list | None = None,
                            add_features: list | None = None, remove_features: list | None = None,
-                           set_cells: list | None = None) -> str:
-        sm = self.ctx.state.get("scene_map")
-        if not sm:
-            raise RulesError("there is no scene map; draw one with draw_scene_map")
+                           set_cells: list | None = None, map: str | None = None) -> str:  # noqa: A002 (tool arg name)
+        mid, sm = self._find_map(map)
         positions = {}
         for c in characters or []:
             positions[self._char(str(c.get("name", "")))[0]] = c
@@ -810,10 +856,26 @@ class ToolBox:
             scenemap.update(sm, party_at, npcs, add_features, remove_features, set_cells, positions)
         except ValueError as e:
             raise RulesError(str(e))
-        return self._scene_done(sm)
+        if positions:  # placing someone on a map puts them there (a split party regrouping, or splitting)
+            moved = set(positions)
+            if mid == "main":
+                scenemap.take_from_side_maps(self.ctx.state, moved)
+            else:
+                sm["members"] = sorted(set(sm.get("members") or []) | moved)
+                scenemap.take_from_side_maps(self.ctx.state, moved, keep=mid)
+        return self._scene_done()
 
-    def t_clear_scene_map(self) -> str:
-        self.ctx.state.pop("scene_map", None)
+    def t_clear_scene_map(self, map: str | None = None) -> str:  # noqa: A002 (tool arg name)
+        st = self.ctx.state
+        if not map:
+            st.pop("scene_map", None)
+            st.pop("side_maps", None)
+            return "ok"
+        mid, _ = self._find_map(map)
+        if mid == "main":
+            st.pop("scene_map", None)
+        else:
+            st["side_maps"] = [m for m in st.get("side_maps") or [] if m["id"] != mid]
         return "ok"
 
     def t_spotlight(self, characters: list[str]) -> str:

@@ -183,10 +183,17 @@ def turn_message(ctx: Ctx, reason: str, body: str, recent: list[tuple[str, str |
         p = ctx.world["party"]
         out.append(f"Party is on the world map at hex ({p['q']},{p['r']}), terrain: "
                    f"{hexmap.BIOME_NAMES[hexmap.biome_at(ctx.world, p['q'], p['r'])]}.")
-    if st.get("scene_map"):
-        out.append(scenemap.describe(st["scene_map"], ctx.party()))
-        out.append("Keep this map true to your narration: if anyone moves, call update_scene_map; if the party "
-                   "leaves this area, draw the new one (or clear_scene_map) before you narrate.")
+    maps = scenemap.maps_with_party(st, ctx.party())
+    if maps:
+        for mid, sm, here in maps:
+            if mid != "main":
+                out.append(f"[Separate map \"{sm.get('title', '')}\": only {', '.join(s['name'] for _, s in here)} "
+                           f"{'is' if len(here) == 1 else 'are'} here, away from the others]")
+            out.append(scenemap.describe(sm, here))
+        out.append("Keep these maps true to your narration: if anyone moves, call update_scene_map; if the party "
+                   "leaves an area, draw the new one (or clear_scene_map) before you narrate. If the party splits up "
+                   "and someone goes somewhere the layout matters, draw them their own map with draw_scene_map's "
+                   "`characters`; when they regroup, place them back on the main map (update_scene_map characters).")
     elif not ctx.encounter:
         out.append("No scene map is drawn. If the party is somewhere its layout matters (a street, a room, a fork, a "
                    "climb), draw one with draw_scene_map this turn so the players can see where they stand.")

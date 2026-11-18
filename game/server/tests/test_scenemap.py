@@ -231,3 +231,56 @@ def test_dm_moves_friendly_npcs_during_a_fight():
             assert tb.call("move_npc", {"name": "Nobody", "x": 1, "y": 1}).startswith("Error")
         finally:
             db.close()
+
+
+def test_split_party_gets_its_own_map_and_regroups():
+    from fastapi.testclient import TestClient
+
+    from app.db import SessionLocal
+    from app.dm.tools import ToolBox
+    from app.game.state import load
+    from app.main import app
+
+    from .test_chat import _character, _client
+
+    with TestClient(app):
+        host, guest = _client("splithost"), _client("splitguest")
+        gid = host.post("/api/games", json={"name": "Split", "character_id": _character(host, "Sevro"),
+                                            "settings": {"ruleset": "2024"}}).json()["id"]
+        code = host.get(f"/api/games/{gid}/view").json()["game"]["invite_code"]
+        assert guest.post("/api/games/join", json={"invite_code": code,
+                                                   "character_id": _character(guest, "Codrina")}).status_code == 200
+        db = SessionLocal()
+        try:
+            ctx = load(db, gid)
+            tb = ToolBox(ctx)
+            assert tb.call("draw_scene_map", {"terrain": "town", "rows": FORK, "party_at": {"x": 4, "y": 6},
+                                              "title": "Chapel"}).startswith("ok")
+            out = tb.call("draw_scene_map", {"terrain": "town", "rows": ["#####", "#...#", "#...#", "#####"],
+                                             "party_at": {"x": 2, "y": 1}, "title": "Vey's hall",
+                                             "characters": ["Codrina"]})
+            assert "Separate map: only Codrina" in out
+            assert tb.call("update_scene_map", {"map": "Vey", "npcs": [{"name": "Vey", "x": 3, "y": 2}]}).startswith("ok")
+            ctx.save()
+        finally:
+            db.close()
+
+        hv = host.get(f"/api/games/{gid}/view").json()
+        gv = guest.get(f"/api/games/{gid}/view").json()
+        assert [(m["title"], m["members"]) for m in hv["scene_maps"]] == [("Chapel", ["Sevro"]), ("Vey's hall", ["Codrina"])]
+        assert hv["scene_map"]["title"] == "Chapel" and gv["scene_map"]["title"] == "Vey's hall"
+        assert [t["name"] for t in gv["scene_map"]["tokens"]] == ["Codrina", "Vey"]
+        assert [t["name"] for t in hv["scene_map"]["tokens"]] == ["Sevro"]
+
+        # Codrina walks back: placed on the main map, her own map goes away
+        db = SessionLocal()
+        try:
+            ctx = load(db, gid)
+            tb = ToolBox(ctx)
+            assert tb.call("update_scene_map", {"characters": [{"name": "Codrina", "x": 4, "y": 5}]}).startswith("ok")
+            ctx.save()
+        finally:
+            db.close()
+        v = host.get(f"/api/games/{gid}/view").json()
+        assert [m["title"] for m in v["scene_maps"]] == ["Chapel"]
+        assert sorted(t["name"] for t in v["scene_map"]["tokens"]) == ["Codrina", "Sevro"]

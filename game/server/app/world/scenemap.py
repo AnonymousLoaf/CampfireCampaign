@@ -256,3 +256,40 @@ def battle_map(sm: dict, char_ids: list[str]) -> dict:
             "cells": ["".join(cell(x, y) for x in range(w)) for y in range(h)], "props": [],
             "difficult": bm.DIFFICULT_NAMES.get(sm["terrain"], "difficult terrain"),
             "title": sm.get("title", ""), "visible": [[x, y] for x, y in vis]}
+
+
+# ── a split party: the main map plus side maps, each for the characters who went off on their own ──
+
+def side_members(state: dict) -> set[str]:
+    return {c for m in state.get("side_maps") or [] for c in m.get("members") or []}
+
+
+def maps_with_party(state: dict, party: list[tuple[str, dict]]) -> list[tuple[str, dict, list[tuple[str, dict]]]]:
+    """[(map id, map, the characters on it)]: the main map ("main") has everyone not on a side map."""
+    away = side_members(state)
+    out = []
+    if state.get("scene_map"):
+        out.append(("main", state["scene_map"], [(c, s) for c, s in party if c not in away]))
+    for m in state.get("side_maps") or []:
+        members = set(m.get("members") or [])
+        out.append((m["id"], m, [(c, s) for c, s in party if c in members]))
+    return out
+
+
+def map_of(state: dict, cid: str | None) -> str | None:
+    """Id of the map a character is on (a side map, else the main one if drawn)."""
+    for m in state.get("side_maps") or []:
+        if cid and cid in (m.get("members") or []):
+            return m["id"]
+    return "main" if state.get("scene_map") else None
+
+
+def take_from_side_maps(state: dict, cids: set[str], keep: str | None = None) -> None:
+    """These characters are somewhere else now: off every side map but `keep`; side maps left empty go away."""
+    maps = []
+    for m in state.get("side_maps") or []:
+        if m["id"] != keep:
+            m["members"] = [c for c in m.get("members") or [] if c not in cids]
+        if m.get("members"):
+            maps.append(m)
+    state["side_maps"] = maps
