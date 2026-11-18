@@ -361,6 +361,14 @@ export interface CharacterView {
 
 export type CustomKind = "feat" | "feature" | "spell" | "item" | "background" | "species_trait" | "race" | "plot";
 
+/** A ready-made campaign plot any host can pick (id "preset:…"). */
+export interface PlotPreset {
+  id: string;
+  name: string;
+  pitch: string;
+  suggest?: Partial<Pick<GameSettings, "story_type" | "tone">>;
+}
+
 /** `data` of a "plot" custom entry (campaign plot): only the DM and the host ever see it. */
 export interface PlotData {
   premise: string;
@@ -512,7 +520,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   magic_level: "standard",
   economy: "standard",
   sell_rate: 0.5,
-  ruleset: "2014",
+  ruleset: "2024",
   rolls: "players",
   combat_mode: "classic",
   narration_length: "medium",

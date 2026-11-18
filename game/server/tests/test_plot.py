@@ -103,3 +103,15 @@ def test_spotlight_labels_the_round_but_still_asks_everyone():
         assert hg["my_turn"] and hg["their_call"] == ["Bryn"]
         pg = next(g for g in player.get("/api/games").json() if g["id"] == gid)
         assert pg["my_turn"] and pg["their_call"] == []
+
+
+def test_ready_made_plots_can_be_picked(client=None):
+    """Every ready-made plot is valid, and a host can start a game with one."""
+    from app.game import plot, plot_presets
+
+    ids = [p["id"] for p in plot_presets.listing()]
+    assert len(ids) >= 6 and len(set(ids)) == len(ids)
+    for pid in ids:
+        snap = plot.snapshot(plot_presets.entry(pid))
+        assert snap["premise"] and snap["entry_id"] == pid
+    assert plot_presets.entry("preset:nope") is None

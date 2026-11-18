@@ -69,7 +69,7 @@ const RACE_GROUPS: { group: "srd" | "campfire" | "homebrew"; title: string | nul
 ];
 
 export default function CharacterCreator({ onDone, onCancel }: { onDone: () => void; onCancel: () => void }) {
-  const [ruleset, setRuleset] = useState<Ruleset>("2014");
+  const [ruleset, setRuleset] = useState<Ruleset>("2024");
   const [opts, setOpts] = useState<CreatorOptions | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [step, setStep] = useState<Step>("Race");

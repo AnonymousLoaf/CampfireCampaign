@@ -25,6 +25,7 @@ from .game import combat, flow
 from .game.hub import Conn, hub
 from .game import notify
 from .game import plot as plot_rules
+from .game import plot_presets
 from .game.notify import nudge as send_nudge
 from .game.state import LIVE_EDITABLE, Ctx, build_view, clean_settings, load, lock_for
 from .config import DATA_DIR
@@ -768,7 +769,18 @@ class CreateGameBody(BaseModel):
     plot_id: str | None = None
 
 
+@router.get("/plots/presets")
+async def plot_presets_list(u: User = Depends(current_user)):
+    """Ready-made campaign plots any host can pick."""
+    return plot_presets.listing()
+
+
 def _plot_snapshot(db: Session, u: User, entry_id: str) -> dict:
+    if entry_id.startswith("preset:"):
+        pe = plot_presets.entry(entry_id)
+        if not pe:
+            raise HTTPException(400, "that ready-made plot doesn't exist")
+        return plot_rules.snapshot(pe)
     e = db.get(CustomEntry, entry_id)
     if not e or e.user_id != u.id or e.kind != "plot":
         raise HTTPException(400, "that campaign plot isn't in your content library")
