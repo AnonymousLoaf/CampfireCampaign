@@ -10,6 +10,7 @@ import Portrait, { PortraitEditor } from "../Portrait";
 import CustomPicker from "../custom/CustomPicker";
 import { KIND_LABEL } from "../custom/MyContentPanel";
 import Journal from "./Journal";
+import EditDetails from "./EditDetails";
 
 type Tab = "sheet" | "inventory" | "spells" | "journal" | "npcs";
 export type CharTab = "sheet" | "inventory" | "spells";
@@ -160,6 +161,7 @@ export function CharacterSheet({
 }) {
   const custom = c.custom ?? [];
   const has = (...k: CustomKind[]) => custom.some((x) => k.includes(x.kind));
+  const [editing, setEditing] = useState(false);
   return (
     <div className="char-sheet">
       <div className="sheet-header">
@@ -176,7 +178,17 @@ export function CharacterSheet({
         )}
         <div className="sheet-header-name">
           <div className="sheet-name">{c.name}</div>
-          {manage && <CustomPicker c={c} run={manage} />}
+          {manage && (
+            <div className="row gap wrap">
+              <CustomPicker c={c} run={manage} />
+              <button className="btn tiny ghost" title="Change name, alignment, token colour or backstory" onClick={() => setEditing(true)}>
+                ✎ Edit details
+              </button>
+            </div>
+          )}
+          {editing && manage && (
+            <EditDetails c={c} onClose={() => setEditing(false)} onSaved={() => void manage(() => Promise.resolve())} />
+          )}
         </div>
       </div>
       {c.pending_level_up && (

@@ -89,3 +89,24 @@ def test_journal_notes_stats_and_epilogue():
         assert ep["party"]["quests_done"] >= 1 and v["game"]["status"] == "ended"
         assert any(l["kind"] == "narration" and (l["data"] or {}).get("epilogue") for l in v["log"])
         assert host.post(f"/api/games/{gid}/end").status_code == 400  # already over
+
+
+def test_players_edit_story_details_of_their_own_character():
+    with TestClient(app):
+        owner, other = _client("detailsowner"), _client("detailsother")
+        cid = _character(owner, "Ash")
+        r = owner.patch(f"/api/characters/{cid}/details", json={"alignment": "Chaotic Neutral", "name": "  Ash  Vale ",
+                                                               "backstory": "Raised by crows.", "color": "#336699"})
+        assert r.status_code == 200, r.text
+        v = r.json()
+        assert (v["name"], v["alignment"], v["backstory"], v["color"]) == ("Ash Vale", "Chaotic Neutral", "Raised by crows.", "#336699")
+        assert owner.patch(f"/api/characters/{cid}/details", json={"alignment": "Very Evil"}).status_code == 400
+        assert owner.patch(f"/api/characters/{cid}/details", json={"color": "red"}).status_code == 422
+        assert other.patch(f"/api/characters/{cid}/details", json={"alignment": "Lawful Good"}).status_code == 404
+        # in a running game the change goes through the game
+        gid = owner.post("/api/games", json={"name": "D", "character_id": cid,
+                                             "settings": {"ruleset": "2024", "round_timer_minutes": 60}}).json()["id"]
+        assert owner.post(f"/api/games/{gid}/start").status_code == 200
+        wait_phase(owner, gid, {"exploration"})
+        assert owner.patch(f"/api/characters/{cid}/details", json={"alignment": "Lawful Good"}).status_code == 200
+        assert owner.get(f"/api/games/{gid}/view").json()["characters"][cid]["alignment"] == "Lawful Good"
