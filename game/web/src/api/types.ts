@@ -795,6 +795,9 @@ export interface Epilogue {
   party: { days?: number; quests_done?: number; quests_failed?: number; npcs_met?: number; places?: number };
 }
 
+/** A scene map: which one it is and who is on it. */
+export type SceneMap = Encounter & { map_id?: string; members?: string[] };
+
 export interface GameView {
   game: {
     id: string;
@@ -830,7 +833,9 @@ export interface GameView {
   scene: { type: string; time_of_day: string; weather: string; day: number; hour: number } | null;
   encounter: Encounter | null;
   /** The DM's map of the party's immediate surroundings (outside combat), fogged to what the party can see. */
-  scene_map?: Encounter | null;
+  scene_map?: SceneMap | null;
+  /** Every scene map: the main group's, plus one for each character or group off on their own (a split party). */
+  scene_maps?: SceneMap[];
   /** A painted picture of the current scene (host's Grok key), shown behind the story and the maps. */
   scene_art?: string | null;
   shop: Shop | null;

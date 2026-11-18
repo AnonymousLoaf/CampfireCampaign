@@ -146,6 +146,10 @@ function GameLoaded({
   const [actingId, setActingId] = useState<string | null>(view.me.character_id ?? controls[0] ?? null);
   const [viewedId, setViewedId] = useState<string | null>(view.me.character_id ?? Object.keys(view.characters)[0] ?? null);
   const [mapTab, setMapTab] = useState<"world" | "scene" | "battle">(view.encounter ? "battle" : view.scene_map ? "scene" : "world");
+  // A split party has several scene maps: start on the one my character is on; anyone can look at the others.
+  const sceneMaps = view.scene_maps ?? (view.scene_map ? [view.scene_map] : []);
+  const [sceneId, setSceneId] = useState<string | undefined>(view.scene_map?.map_id);
+  const shownScene = sceneMaps.find((m) => m.map_id === sceneId) ?? view.scene_map ?? sceneMaps[0] ?? null;
   const [modal, setModal] = useState<null | "shop" | "settings" | "tv">(null);
   const [levelUpFor, setLevelUpFor] = useState<string | null>(null);
   const isMobile = useIsMobile();
@@ -201,10 +205,13 @@ function GameLoaded({
     if (hasEncounter && !isMobile) setLayoutState((l) => reveal(l, "map"));
   }, [hasEncounter]); // eslint-disable-line react-hooks/exhaustive-deps
   // A new scene map (the DM drew one, or cleared it) switches the tab outside fights.
-  const sceneKey = view.scene_map ? `${view.scene_map.title ?? ""}|${view.scene_map.grid.w}x${view.scene_map.grid.h}` : "";
+  const sceneKey = view.scene_map
+    ? `${view.scene_map.map_id ?? ""}|${view.scene_map.title ?? ""}|${view.scene_map.grid.w}x${view.scene_map.grid.h}`
+    : "";
   useEffect(() => {
     if (hasEncounter) return;
-    setMapTab((t) => (sceneKey ? "scene" : t === "scene" ? "world" : t));
+    setSceneId(view.scene_map?.map_id);
+    setMapTab((t) => (sceneKey ? "scene" : t === "scene" && !sceneMaps.length ? "world" : t));
   }, [sceneKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Open the shop automatically when a shop phase starts.
@@ -437,11 +444,28 @@ function GameLoaded({
               <button className={mapTab === "world" ? "active" : ""} onClick={() => setMapTab("world")}>
                 🗺 World map
               </button>
-              {view.scene_map && (
-                <button className={mapTab === "scene" ? "active" : ""} onClick={() => setMapTab("scene")} title="Your immediate surroundings — only what your characters can see">
-                  👁 Scene{view.scene_map.title ? ` · ${view.scene_map.title}` : ""}
-                </button>
-              )}
+              {sceneMaps.map((m) => {
+                const mine = m.map_id === view.scene_map?.map_id;
+                const others = sceneMaps.length > 1 && !mine && m.members?.length ? ` (${m.members.join(", ")})` : "";
+                return (
+                  <button
+                    key={m.map_id ?? "scene"}
+                    className={mapTab === "scene" && shownScene?.map_id === m.map_id ? "active" : ""}
+                    onClick={() => {
+                      setSceneId(m.map_id);
+                      setMapTab("scene");
+                    }}
+                    title={
+                      mine
+                        ? "Your immediate surroundings — only what your characters can see"
+                        : `Where ${m.members?.join(" and ") || "the others"} ${m.members?.length === 1 ? "is" : "are"}, away from you — only what they can see`
+                    }
+                  >
+                    👁 {m.title || "Scene"}
+                    {others}
+                  </button>
+                );
+              })}
               <button className={mapTab === "battle" ? "active" : ""} disabled={!enc} onClick={() => setMapTab("battle")}>
                 ⚔ Battle map{enc ? ` · round ${enc.round}` : ""}
               </button>
@@ -465,8 +489,16 @@ function GameLoaded({
                 ) : (
                   <div className="map-empty muted">The world map appears when the game starts.</div>
                 ))}
-              {mapTab === "scene" && view.scene_map && (
-                <BattleMap encounter={view.scene_map} portraits={portraits} viewerTokenId={view.scene_map.my_token_id} interactive backdrop={!!view.scene_art} infoFor={infoFor} />
+              {mapTab === "scene" && shownScene && (
+                <BattleMap
+                  key={shownScene.map_id ?? "scene"}
+                  encounter={shownScene}
+                  portraits={portraits}
+                  viewerTokenId={shownScene.my_token_id}
+                  interactive
+                  backdrop={!!view.scene_art}
+                  infoFor={infoFor}
+                />
               )}
               {mapTab === "battle" && enc && (
                 <BattleMap encounter={enc} portraits={portraits} actorTokenId={enc.turn.actor_id} viewerTokenId={viewerTokenId} interactive backdrop={!!view.scene_art} infoFor={infoFor} />

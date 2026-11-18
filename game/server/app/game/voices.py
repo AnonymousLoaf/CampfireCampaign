@@ -344,8 +344,9 @@ def speakers_and_about(ctx) -> tuple[list[str], dict[str, str]]:
     for n in ctx.state.get("npcs") or []:
         if n.get("name"):
             about[n["name"]] = " ".join(str(n.get(k) or "") for k in ("role", "notes"))
-    for n in (ctx.state.get("scene_map") or {}).get("npcs") or []:
-        about.setdefault(n["name"], "")
+    for sm in [ctx.state.get("scene_map") or {}] + list(ctx.state.get("side_maps") or []):
+        for n in sm.get("npcs") or []:
+            about.setdefault(n["name"], "")
     for _, s in ctx.party():
         race = (s.get("race") or "").replace("-", " ")
         about[s["name"]] = f"{race} {s.get('class', '')} {s.get('backstory', '')[:200]}"

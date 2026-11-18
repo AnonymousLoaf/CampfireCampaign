@@ -409,6 +409,13 @@ def build_view(db: Session, ctx: Ctx, uid: str | None, tv: bool = False) -> dict
     logs.reverse()
     tv_token = ctx.state.get("tv_token")
     npc_faces = npc_art_by_name(ctx.state.get("npcs") or [])
+    my_char = my_member.character_id if my_member else None
+    scene_maps = []
+    for mid, sm, here in scenemap.maps_with_party(ctx.state, ctx.party()):
+        v = _with_npc_faces(scenemap.view(sm, here, my_char if any(c == my_char for c, _ in here) else None), npc_faces)
+        v["map_id"] = mid
+        v["members"] = [s["name"] for _, s in here]
+        scene_maps.append(v)
     return {
         "game": {"id": game.id, "name": game.name, "status": game.status, "invite_code": game.invite_code,
                  "host_id": game.host_id, "settings": _public_settings(ctx.settings, is_host),
@@ -430,9 +437,8 @@ def build_view(db: Session, ctx: Ctx, uid: str | None, tv: bool = False) -> dict
         "scene": ctx.state.get("scene") or {"type": "town", "time_of_day": "morning", "weather": "clear", "day": 1, "hour": 8},
         "encounter": _with_npc_faces(combat.view(enc, ctx.chars, controls) if enc else None, npc_faces),
         "scene_art": art_url((ctx.state.get("scene_art") or {}).get("name")),
-        "scene_map": _with_npc_faces(scenemap.view(ctx.state["scene_map"], ctx.party(),
-                                                   my_member.character_id if my_member else None)
-                                     if ctx.state.get("scene_map") else None, npc_faces),
+        "scene_map": next((m for m in scene_maps if m["map_id"] == scenemap.map_of(ctx.state, my_char)), None),
+        "scene_maps": scene_maps,
         "shop": shop_rules.stock_view(shop) if shop else None,
         "npcs": [{**{k: v for k, v in n.items() if k != "art"},
                   "portrait_url": art_url(n.get("art"))} for n in ctx.state.get("npcs", [])],
