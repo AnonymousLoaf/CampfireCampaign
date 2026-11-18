@@ -349,7 +349,7 @@ export class DiceTable {
       x = Math.max(-hx + inset, Math.min(hx - inset, x));
       z = Math.max(-hz + inset, Math.min(hz - inset, z));
       const body = new CANNON.Body({ mass: 1, shape: shapes[i].shape, linearDamping: 0.12, angularDamping: 0.12,
-                                     allowSleep: true, sleepSpeedLimit: 0.25, sleepTimeLimit: 0.4 });
+                                     allowSleep: true, sleepSpeedLimit: 0.12, sleepTimeLimit: 0.5 });
       body.position.set(x, r * 2 + Math.random() * r * 2, z);
       body.quaternion.setFromEuler(Math.random() * 6.28, Math.random() * 6.28, Math.random() * 6.28);
       const tx = (Math.random() * 2 - 1) * hx * 0.4;
@@ -368,6 +368,39 @@ export class DiceTable {
       frames.push(bodies.map((b) => ({ p: [b.position.x, b.position.y, b.position.z],
                                        q: [b.quaternion.x, b.quaternion.y, b.quaternion.z, b.quaternion.w] })));
       if (step > 30 && bodies.every((b) => b.sleepState === CANNON.Body.SLEEPING)) break;
+    }
+
+    // ── finish flat: a die that stopped leaning on an edge tips onto its nearest face ──
+    const down = new THREE.Vector3(0, -1, 0);
+    const lastF = frames[frames.length - 1];
+    const lowest = (i: number, q: THREE.Quaternion) => Math.min(...shapes[i].verts.map((v) => v.clone().applyQuaternion(q).y));
+    const tips = bodies.map((_, i) => {
+      const q0 = new THREE.Quaternion(lastF[i].q[0], lastF[i].q[1], lastF[i].q[2], lastF[i].q[3]);
+      let best = -Infinity;
+      let n = down;
+      for (const f of shapes[i].faces) {
+        const wn = f.normal.clone().applyQuaternion(q0);
+        const d = wn.dot(down);
+        if (d > best) [best, n] = [d, wn];
+      }
+      const q1 = new THREE.Quaternion().setFromUnitVectors(n, down).multiply(q0);
+      return { q0, q1, y0: lastF[i].p[1], y1: -lowest(i, q1), tilt: Math.acos(Math.min(1, best)) };
+    });
+    const maxTilt = Math.max(...tips.map((t) => t.tilt));
+    if (maxTilt > 0.005 || tips.some((t) => Math.abs(t.y1 - t.y0) > 0.005)) {
+      const k = Math.max(4, Math.min(20, Math.round(maxTilt * 40))); // ~0.1-0.33 s, longer for a bigger lean
+      for (let j = 1; j <= k; j++) {
+        const t = j / k;
+        const e = t * t * (3 - 2 * t);
+        frames.push(
+          bodies.map((_, i) => {
+            const T = tips[i];
+            const q = T.q0.clone().slerp(T.q1, e);
+            const y = Math.max(T.y0 + (T.y1 - T.y0) * e, -lowest(i, q)); // never sink into the table mid-tip
+            return { p: [lastF[i].p[0], y, lastF[i].p[2]], q: [q.x, q.y, q.z, q.w] };
+          }),
+        );
+      }
     }
 
     // ── put the server's numbers on the faces that came up ──
