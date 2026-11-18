@@ -43,6 +43,15 @@ def test_detect_ruleset_and_keep_features():
     assert s14["ruleset"] == "2014"
 
 
+def test_import_warns_when_no_gear_was_chosen():
+    d = _ddb_json(legacy=False)
+    assert not any("equipment" in i["issue"] for i in ddb.to_sheet(d)["issues"])
+    d["inventory"], d["currencies"] = [], {}
+    issues = ddb.to_sheet(d)["issues"]
+    assert "No equipment or money" in issues[0]["issue"]
+    assert not any("doesn't carry" in i["issue"] for i in issues)
+
+
 def _client(name):
     c = TestClient(app)
     assert c.post("/api/auth/register", json={"username": name, "password": "secret123", "display_name": name}).status_code == 200
