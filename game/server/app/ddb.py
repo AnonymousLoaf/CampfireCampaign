@@ -273,6 +273,14 @@ def to_sheet(d: dict) -> dict:
                         custom={"name": it["name"][:60], "description": "Imported from D&D Beyond.", "value_cp": 0,
                                 "category": "Treasure"})
 
+    if not sheet["inventory"] and not sheet["gold_cp"]:
+        # Usually imported mid-build: D&D Beyond's 2024 builder asks for equipment last. "Doesn't carry" notes are noise then.
+        issues[:] = [i for i in issues if "doesn't carry" not in i.get("issue", "")]
+        issues.insert(0, {"issue": "No equipment or money came across: it looks like equipment hasn't been chosen on "
+                                   "D&D Beyond yet",
+                          "fix": "finish the Equipment step on D&D Beyond (starting gear or gold), then delete this "
+                                 "character and import it again"})
+
     # spells: SRD ones become real spells; the rest are kept as custom spells
     spells = srd.spells(ruleset)
     by_name = {s["name"].lower().replace("'", ""): k for k, s in spells.items()}

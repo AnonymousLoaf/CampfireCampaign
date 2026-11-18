@@ -261,6 +261,22 @@ TOOLS: list[dict] = [
      "input_schema": {"type": "object", "properties": {
          "title": {"type": "string"}, "status": {"type": "string", "enum": ["active", "done", "failed"]},
          "notes": {"type": "string"}}, "required": ["title"]}},
+    {"name": "journal",
+     "description": "Write one line in the party's journal, which the players read: a clue or lead they found "
+                    "('clue'), a notable place they discovered or visited ('place'), or a key moment of the story "
+                    "('moment': a victory, a loss, a vow, a betrayal). Only what the characters actually know; never "
+                    "secrets. Keep each to one sentence. Don't repeat quests or NPCs, which have their own lists.",
+     "input_schema": {"type": "object", "properties": {
+         "kind": {"type": "string", "enum": ["clue", "place", "moment"]},
+         "text": {"type": "string"},
+         "quest": {"type": "string", "description": "Title of the quest this relates to, if any"}},
+         "required": ["kind", "text"]}},
+    {"name": "story_complete",
+     "description": "Call once when the campaign's main story has truly reached its ending (the climax is resolved "
+                    "and the main threads are tied off). The host is then offered to close the campaign with an "
+                    "epilogue. Not for the end of a chapter or a side quest.",
+     "input_schema": {"type": "object", "properties": {
+         "note": {"type": "string", "description": "One line on how it ended"}}, "required": []}},
     {"name": "name_place",
      "description": "Rename or describe a generated settlement or place of interest on the world map (by its id or current name).",
      "input_schema": {"type": "object", "properties": {
@@ -296,6 +312,8 @@ TOOLS: list[dict] = [
          "required": []}},
 ]
 FACTS_MAX = 40
+JOURNAL_KINDS = ("clue", "place", "moment")
+JOURNAL_MAX = 200
 
 TOOL_NAMES = [t["name"] for t in TOOLS]
 
@@ -684,8 +702,10 @@ class ToolBox:
             for _, s in party:
                 if s["gold_cp"] + each < 0:
                     raise RulesError(f"{s['name']} can't pay that much")
-            for _, s in party:
+            for pid, s in party:
                 s["gold_cp"] += each
+                if each > 0:
+                    self.ctx.bump(pid, "gold_cp", each)
             self.ctx.log("event", f"The party {'gains' if cp >= 0 else 'pays'} {shop_rules.fmt_cp(abs(cp))}"
                          f" ({shop_rules.fmt_cp(abs(each))} each).")
             return "ok"
@@ -693,6 +713,8 @@ class ToolBox:
         if s["gold_cp"] + cp < 0:
             raise RulesError(f"{s['name']} only has {shop_rules.fmt_cp(s['gold_cp'])}")
         s["gold_cp"] += cp
+        if cp > 0:
+            self.ctx.bump(cid, "gold_cp", cp)
         self.ctx.log("event", f"{s['name']} {'gains' if cp >= 0 else 'pays'} {shop_rules.fmt_cp(abs(cp))}.")
         return f"{s['name']} now has {shop_rules.fmt_cp(s['gold_cp'])}."
 
@@ -876,17 +898,44 @@ class ToolBox:
     def t_upsert_quest(self, title: str, status: str | None = None, notes: str | None = None) -> str:
         qs = self.ctx.state.setdefault("quests", [])
         q = next((x for x in qs if x["title"].lower() == title.strip().lower()), None)
+        day = (self.ctx.state.get("scene") or {}).get("day", 1)
         if not q:
-            q = {"title": title.strip()[:80], "status": "active", "notes": ""}
+            q = {"title": title.strip()[:80], "status": "active", "notes": "", "day": day}
             qs.append(q)
             self.ctx.log("event", f"New quest: {q['title']}.")
         if status:
             if status != q["status"] and status in ("done", "failed"):
                 self.ctx.log("event", f"Quest {'completed' if status == 'done' else 'failed'}: {q['title']}.")
+                q["ended_day"] = day
             q["status"] = status
         if notes:
             q["notes"] = notes[:600]
         return "ok"
+
+    def t_journal(self, kind: str, text: str, quest: str | None = None) -> str:
+        if kind not in JOURNAL_KINDS:
+            raise RulesError(f"kind must be one of {', '.join(JOURNAL_KINDS)}")
+        text = " ".join(text.split())[:300]
+        if not text:
+            raise RulesError("write the entry")
+        j = self.ctx.state.setdefault("journal", [])
+        if any(e["text"].lower() == text.lower() for e in j):
+            return "already in the journal"
+        e = {"id": uuid.uuid4().hex[:8], "kind": kind, "text": text,
+             "day": (self.ctx.state.get("scene") or {}).get("day", 1)}
+        if quest:
+            e["quest"] = quest.strip()[:80]
+        j.append(e)
+        del j[:-JOURNAL_MAX]
+        return "ok"
+
+    def t_story_complete(self, note: str = "") -> str:
+        if self.ctx.state.get("story_complete"):
+            return "already marked"
+        self.ctx.state["story_complete"] = {"note": note[:400], "day": (self.ctx.state.get("scene") or {}).get("day", 1)}
+        self.ctx.log("event", "✦ The story has reached its end. The host can close the campaign with an epilogue "
+                              "(Game settings → End campaign), or the party can play on.")
+        return "Marked. Keep narrating normally: the host decides when to close the campaign."
 
     def t_name_place(self, place: str, new_name: str | None = None, description: str | None = None) -> str:
         w = self.ctx.world
@@ -1078,17 +1127,23 @@ def rest_party(ctx: Ctx, kind: str, who: list[str] | None = None) -> str:
     if ctx.encounter:
         raise RulesError("you can't rest in the middle of a fight")
     res = []
+    preparers: list[str] = []
     for cid, s in ctx.living_party():
         if who is not None and cid not in who:
             continue
         r = ch.long_rest(s) if kind == "long" else ch.short_rest(s)
         res.append(f"{s['name']} +{r['healed']} HP")
+        if kind == "long" and ch.can_change_prepared(s):
+            preparers.append(s["name"])
     hours = REST_HOURS.get(ctx.settings.get("rest_rule", "standard"), REST_HOURS["standard"])[kind]
     advance_clock(ctx, hours)
     span = {0: "a few minutes", 1: "an hour", 8: "the night", 168: "a full week"}.get(hours, f"{hours} hours")
     if res:
         ctx.log("event", f"{'The party' if who is None else ', '.join(ctx.chars[c]['name'] for c in who)} "
                          f"{'takes a' if who is None else 'take a'} {kind} rest ({span}). " + ", ".join(res) + ".")
+    if preparers:
+        ctx.log("event", f"{' and '.join(preparers)} can change {'their' if len(preparers) > 1 else 'the'} prepared "
+                         f"spells now (Spells tab), until the first spell is cast or a fight starts.")
     return "; ".join(res) or "no one rested"
 
 

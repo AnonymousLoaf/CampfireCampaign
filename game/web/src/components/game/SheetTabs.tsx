@@ -9,14 +9,17 @@ import { abilityKey, skillKey } from "../../rules/glossary";
 import Portrait, { PortraitEditor } from "../Portrait";
 import CustomPicker from "../custom/CustomPicker";
 import { KIND_LABEL } from "../custom/MyContentPanel";
+import Journal from "./Journal";
 
-type Tab = "sheet" | "inventory" | "spells" | "quests" | "npcs";
+type Tab = "sheet" | "inventory" | "spells" | "journal" | "npcs";
+export type CharTab = "sheet" | "inventory" | "spells";
 
+/** Phones (and the default desktop layout's single box): every character tab behind one tab strip. */
 export default function SheetTabs({ viewedId, onViewed }: { viewedId: string | null; onViewed: (id: string) => void }) {
-  const { view, controls, openLevelUp, run } = useGame();
+  const { view } = useGame();
   const [tab, setTab] = useState<Tab>("sheet");
   const c = viewedId ? view.characters[viewedId] : undefined;
-  const editable = !!c && controls.includes(c.id);
+  const activeQuests = view.quests.filter((q) => q.status === "active").length;
 
   return (
     <div className="sheet-tabs">
@@ -29,73 +32,86 @@ export default function SheetTabs({ viewedId, onViewed }: { viewedId: string | n
         </button>
         {c?.spellcasting && (
           <button className={tab === "spells" ? "active" : ""} onClick={() => setTab("spells")}>
-            Spells
+            Spells{c.spellcasting.prepares && c.spellcasting.prep_open && c.spellcasting.spells.length === 0 ? " ✦" : ""}
           </button>
         )}
-        <button className={tab === "quests" ? "active" : ""} onClick={() => setTab("quests")}>
-          Quests {view.quests.filter((q) => q.status === "active").length > 0 && <span className="count">{view.quests.filter((q) => q.status === "active").length}</span>}
+        <button className={tab === "journal" ? "active" : ""} onClick={() => setTab("journal")}>
+          Journal {activeQuests > 0 && <span className="count">{activeQuests}</span>}
         </button>
         <button className={tab === "npcs" ? "active" : ""} onClick={() => setTab("npcs")}>
           NPCs
         </button>
       </div>
       {(tab === "sheet" || tab === "inventory" || tab === "spells") && (
-        <div className="viewing-row">
-          <select value={viewedId ?? ""} onChange={(e) => onViewed(e.target.value)}>
-            {Object.values(view.characters).map((ch) => (
-              <option key={ch.id} value={ch.id}>
-                {ch.name}
-                {ch.id === view.me.character_id ? " (you)" : controls.includes(ch.id) ? " (you control)" : ""}
-              </option>
-            ))}
-          </select>
-          {!editable && c && <span className="muted small">view only</span>}
+        <CharPanel which={tab} viewedId={viewedId} onViewed={onViewed} />
+      )}
+      {tab === "journal" && (
+        <div className="sheet-body">
+          <Journal />
         </div>
       )}
-      <div className="sheet-body">
-        {tab === "sheet" && c && (
-          <RulesetContext.Provider value={c.ruleset}>
-          <CharacterSheet
-            c={c}
-            onLevelUp={editable && openLevelUp ? () => openLevelUp(c.id) : undefined}
-            manage={c.owner_id === view.me.user_id ? run : undefined}
-          />
-          </RulesetContext.Provider>
-        )}
-        <RulesetContext.Provider value={c?.ruleset}>
-          {tab === "inventory" && c && <Inventory c={c} editable={editable} />}
-          {tab === "spells" && c?.spellcasting && <Spells c={c} editable={editable} />}
-        </RulesetContext.Provider>
-        {tab === "quests" && (
-          <div className="stack-tight">
-            {view.quests.length === 0 && <div className="muted small">No quests yet.</div>}
-            {view.quests.map((q, i) => (
-              <div key={i} className={`quest ${q.status}`}>
-                <div>
-                  <strong>{q.title}</strong> <span className={`badge ${q.status === "done" ? "green" : q.status === "failed" ? "red" : "gold"}`}>{q.status}</span>
-                </div>
-                {q.notes && <div className="small">{q.notes}</div>}
-              </div>
-            ))}
-          </div>
-        )}
-        {tab === "npcs" && (
-          <div className="stack-tight">
-            {view.npcs.length === 0 && <div className="muted small">You haven't met anyone notable yet.</div>}
-            {view.npcs.map((n, i) => (
-              <div key={i} className={`npc ${n.portrait_url ? "with-face" : ""}`}>
-                {n.portrait_url && <Portrait c={{ name: n.name, class: "", color: "#5a7d9a", portrait_url: n.portrait_url }} size="big" zoomable />}
-                <div className="npc-text">
-                  <div>
-                    <strong>{n.name}</strong> <span className="muted small">{n.role}</span> {n.attitude && <span className="badge">{n.attitude}</span>}
-                  </div>
-                  {n.notes && <div className="small">{n.notes}</div>}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+      {tab === "npcs" && (
+        <div className="sheet-body">
+          <NpcList />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** One character tab (sheet, inventory or spells) with the "viewing" picker; also a docked panel on its own. */
+export function CharPanel({ which, viewedId, onViewed }: { which: CharTab; viewedId: string | null; onViewed: (id: string) => void }) {
+  const { view, controls, openLevelUp, run } = useGame();
+  const c = viewedId ? view.characters[viewedId] : undefined;
+  const editable = !!c && controls.includes(c.id);
+  return (
+    <>
+      <div className="viewing-row">
+        <select value={viewedId ?? ""} onChange={(e) => onViewed(e.target.value)}>
+          {Object.values(view.characters).map((ch) => (
+            <option key={ch.id} value={ch.id}>
+              {ch.name}
+              {ch.id === view.me.character_id ? " (you)" : controls.includes(ch.id) ? " (you control)" : ""}
+            </option>
+          ))}
+        </select>
+        {!editable && c && <span className="muted small">view only</span>}
       </div>
+      <div className="sheet-body">
+        <RulesetContext.Provider value={c?.ruleset}>
+          {which === "sheet" && c && (
+            <CharacterSheet
+              c={c}
+              onLevelUp={editable && openLevelUp ? () => openLevelUp(c.id) : undefined}
+              manage={c.owner_id === view.me.user_id ? run : undefined}
+            />
+          )}
+          {which === "inventory" && c && <Inventory c={c} editable={editable} />}
+          {which === "spells" &&
+            c &&
+            (c.spellcasting ? <Spells c={c} editable={editable} /> : <div className="muted small">{c.name} doesn't cast spells.</div>)}
+        </RulesetContext.Provider>
+      </div>
+    </>
+  );
+}
+
+export function NpcList() {
+  const { view } = useGame();
+  return (
+    <div className="stack-tight">
+      {view.npcs.length === 0 && <div className="muted small">You haven't met anyone notable yet.</div>}
+      {view.npcs.map((n, i) => (
+        <div key={i} className={`npc ${n.portrait_url ? "with-face" : ""}`}>
+          {n.portrait_url && <Portrait c={{ name: n.name, class: "", color: "#5a7d9a", portrait_url: n.portrait_url }} size="big" zoomable />}
+          <div className="npc-text">
+            <div>
+              <strong>{n.name}</strong> <span className="muted small">{n.role}</span> {n.attitude && <span className="badge">{n.attitude}</span>}
+            </div>
+            {n.notes && <div className="small">{n.notes}</div>}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -451,6 +467,7 @@ function Spells({ c, editable }: { c: CharacterView; editable: boolean }) {
   const [editing, setEditing] = useState(false);
   const [chosen, setChosen] = useState<string[]>([]);
   const canPrepare = editable && !!sc.prepares && (sc.options?.length ?? 0) > 0;
+  const prepOpen = sc.prep_open !== false;
   const busyPhase = view.phase.type === "combat" || view.phase.type === "dm";
   const max = sc.prepared_max ?? sc.options?.length ?? 0;
   const charParam = c.id !== view.me.character_id ? c.id : undefined;
@@ -498,11 +515,23 @@ function Spells({ c, editable }: { c: CharacterView; editable: boolean }) {
           ) : null}
         </h4>
         {canPrepare && !editing && (
-          <button className="btn tiny" disabled={busyPhase} title={busyPhase ? "Not during combat" : ""} onClick={startEdit}>
-            Prepare spells
+          <button
+            className={`btn tiny ${prepOpen ? "primary" : ""}`}
+            disabled={busyPhase || !prepOpen}
+            title={busyPhase ? "Not during combat" : prepOpen ? "" : "Locked until your next long rest (or level up)"}
+            onClick={startEdit}
+          >
+            {prepOpen ? "Prepare spells" : "🔒 Prepared"}
           </button>
         )}
       </div>
+      {canPrepare && !editing && (
+        <div className={`prep-note small ${prepOpen ? "open" : ""}`}>
+          {prepOpen
+            ? "✦ You can change your prepared spells now. The list locks once you cast a spell or a fight starts."
+            : "Your prepared spells are set for today. You can change them after your next long rest."}
+        </div>
+      )}
       {editing ? (
         <div className="prepare-editor">
           <p className="muted small">

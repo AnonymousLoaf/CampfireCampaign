@@ -5,6 +5,7 @@ import Modal from "../Modal";
 import ErrorText, { useAction } from "../ErrorText";
 import { Field, INPUT, NARRATION, ROLLS, Seg, TIMEOUT, TimerPicker } from "../lobby/CreateGameModal";
 import { useGame } from "./gameContext";
+import { endCampaign } from "./Epilogue";
 
 const KEYS: (keyof SettingsPatch)[] = [
   "round_timer_minutes",
@@ -24,7 +25,7 @@ const KEYS: (keyof SettingsPatch)[] = [
 ];
 
 export default function HostSettingsModal({ onClose }: { onClose: () => void }) {
-  const { view, gameId, refresh } = useGame();
+  const { view, gameId, refresh, run } = useGame();
   const orig = view.game.settings;
   const [s, setS] = useState<GameSettings>({ ...orig });
   const [meta, setMeta] = useState<Meta | null>(null);
@@ -164,6 +165,24 @@ export default function HostSettingsModal({ onClose }: { onClose: () => void }) 
             <input value={s.discord_webhook ?? ""} onChange={(e) => set("discord_webhook", e.target.value)} placeholder="https://discord.com/api/webhooks/…" />
           </Field>
         </fieldset>
+        {view.game.status === "active" && (
+          <fieldset>
+            <legend>End the campaign</legend>
+            <div className="muted small">
+              When the story is over, the DM writes an epilogue: what became of the world and of each hero, with everyone's stats and
+              awards. After that the game is finished and can't be played on.
+              {view.story_complete ? " The DM says the main story has reached its end." : ""}
+            </div>
+            <button
+              className="btn danger small"
+              disabled={!!view.encounter || view.epilogue?.status === "writing"}
+              title={view.encounter ? "Finish the fight first" : ""}
+              onClick={() => void endCampaign(gameId, run).then((ok) => ok && onClose())}
+            >
+              End campaign &amp; write the epilogue
+            </button>
+          </fieldset>
+        )}
       </div>
     </Modal>
   );
