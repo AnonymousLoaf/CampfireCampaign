@@ -647,18 +647,16 @@
   align-items: center;
   gap: 6px 8px;
   flex-wrap: wrap; /* in a narrow panel, the hint gets its own line and the buttons drop below it */
+  justify-content: flex-end; /* wrapped buttons all line up on the right */
 }
 .composer-row > span,
 .composer-row > .muted {
   flex: 1 1 15rem;
   min-width: 0;
 }
-/* next to a hint, the hint itself does the pushing, and the buttons stay right-aligned when they wrap */
+/* next to a hint, the hint itself does the pushing */
 .composer-row > span ~ .grow {
   display: none;
-}
-.composer-row > span ~ .grow + .btn {
-  margin-left: auto;
 }
 .composer-row > .btn,
 .composer-row > .toggle {
