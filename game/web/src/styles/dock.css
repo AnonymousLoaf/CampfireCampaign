@@ -169,7 +169,7 @@ body.resizing-row * {
 .dock-body.panel-composer > .composer {
   max-height: none;
   border-top: none;
-  flex: 1;
+  flex: 1 0 auto; /* a short panel scrolls instead of squashing the text box */
 }
 /* Sheet tabs that used to live in one box are separate panels now: drop the inner box */
 .dock-body .sheet-body {
