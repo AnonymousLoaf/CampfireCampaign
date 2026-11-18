@@ -136,3 +136,19 @@ def test_town_map_close_start_and_opening_report():
     assert gap <= 25 or any("attacks" in ln["text"] for ln in lines)  # enemies may already have closed in
     report = ToolBox._combat_opening(enc, lines)
     assert "Initiative" in report and "attacks:" in report and "Scimitar" in report
+
+
+def test_spare_weapons_stack_and_equipped_ones_split_off():
+    from app.rules import character as ch
+    s = {"inventory": []}
+    ch.add_item(s, "dagger", 1)
+    ch.add_item(s, "dagger", 1)
+    assert [(i["key"], i["qty"]) for i in s["inventory"]] == [("dagger", 2)]
+    ch.equip(s, s["inventory"][0]["id"], True)
+    assert sorted((i["qty"], i["equipped"]) for i in s["inventory"]) == [(1, False), (1, True)]
+    ch.equip(s, next(i for i in s["inventory"] if i["equipped"])["id"], False)
+    assert [(i["qty"], i["equipped"]) for i in s["inventory"]] == [(2, False)]
+    s["inventory"] += [ch.make_item("handaxe"), ch.make_item("handaxe"), ch.make_item("handaxe", 1, True)]
+    ch.stack_inventory(s)
+    assert sorted((i["key"], i["qty"], i["equipped"]) for i in s["inventory"]) == [
+        ("dagger", 2, False), ("handaxe", 1, True), ("handaxe", 2, False)]

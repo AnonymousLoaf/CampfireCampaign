@@ -263,10 +263,10 @@ def to_sheet(d: dict) -> dict:
         rec = srd.find_item(it["name"])
         qty = max(1, int(it.get("qty") or 1))
         if rec:
-            if rec["category"] in ("Weapon", "Armor"):
-                for i in range(qty):
-                    sheet["inventory"].append(ch.make_item(rec["index"], 1, bool(it["equipped"]) and i == 0))
-            else:
+            if it["equipped"] and rec["category"] in ("Weapon", "Armor"):
+                sheet["inventory"].append(ch.make_item(rec["index"], 1, True))
+                qty -= 1
+            if qty:
                 ch.add_item(sheet, rec["index"], qty)
         else:
             ch.add_item(sheet, "custom-" + _slug(it["name"])[:20], qty,
