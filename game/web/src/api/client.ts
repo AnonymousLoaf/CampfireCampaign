@@ -1,6 +1,7 @@
 import type {
   AbilityRoll,
   CharacterView,
+  PlotPreset,
   ChatMessage,
   CreateCharacter,
   CreatorOptions,
@@ -138,6 +139,7 @@ export const api = {
   createGame: (name: string, settings: Partial<GameSettings>, character_id: string, plot_id?: string | null) =>
     post<{ id: string }>("/games", { name, settings, character_id, plot_id: plot_id || null }),
   setPlot: (id: string, entry_id: string | null) => put<Ok>(`/games/${id}/plot`, { entry_id }),
+  plotPresets: () => get<PlotPreset[]>("/plots/presets"),
   joinGame: (invite_code: string, character_id: string) =>
     post<{ id: string }>("/games/join", { invite_code, character_id }),
   spectateGame: (invite_code: string) => post<{ id: string }>("/games/join", { invite_code, spectate: true }),

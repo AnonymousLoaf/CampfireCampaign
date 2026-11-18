@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { api } from "../../api/client";
-import { DEFAULT_SETTINGS, type CharacterView, type CustomEntry, type GameSettings, type Meta } from "../../api/types";
+import { DEFAULT_SETTINGS, type CharacterView, type CustomEntry, type GameSettings, type Meta, type PlotPreset } from "../../api/types";
 import Modal from "../Modal";
 import ErrorText, { useAction } from "../ErrorText";
 import CharacterPicker from "./CharacterPicker";
@@ -8,56 +8,56 @@ import CharacterPicker from "./CharacterPicker";
 type Opt<T extends string> = { value: T; label: string; hint?: string };
 
 const STORY: Opt<GameSettings["story_type"]>[] = [
-  { value: "sandbox", label: "Open sandbox" },
-  { value: "dungeon_crawl", label: "Dungeon crawl" },
-  { value: "mystery", label: "Mystery" },
-  { value: "heist", label: "Heist" },
-  { value: "war", label: "War" },
-  { value: "horror", label: "Horror" },
-  { value: "wilderness", label: "Wilderness survival" },
-  { value: "intrigue", label: "Political intrigue" },
-  { value: "seafaring", label: "Seafaring" },
+  { value: "sandbox", label: "Open sandbox", hint: "No set storyline. The DM offers hooks (rumours, jobs, strange places) and the party picks its own goals." },
+  { value: "dungeon_crawl", label: "Dungeon crawl", hint: "Delves into ruins, caves and tombs: traps, monsters, secret doors and treasure, floor by floor." },
+  { value: "mystery", label: "Mystery", hint: "A crime or secret to uncover. Expect clues, suspects, lies and questioning more than fights." },
+  { value: "heist", label: "Heist", hint: "Plan and pull off a daring theft: scout the target, gather a crew and tools, then execute while things go wrong." },
+  { value: "war", label: "War", hint: "Factions at war: battles, sieges, missions behind the lines and hard choices about loyalty." },
+  { value: "horror", label: "Horror", hint: "Dread and the unknown. Threats are often better avoided than fought, and not everything can be killed." },
+  { value: "wilderness", label: "Wilderness survival", hint: "Harsh lands, scarce food and water, weather, beasts and long journeys between safe places." },
+  { value: "intrigue", label: "Political intrigue", hint: "Nobles, guilds and spies. Talking, scheming and secrets matter more than swords." },
+  { value: "seafaring", label: "Seafaring", hint: "Ships, coasts and islands: pirates, storms, sea monsters and ports of call." },
 ];
 const TONE: Opt<GameSettings["tone"]>[] = [
-  { value: "heroic", label: "Heroic" },
-  { value: "gritty", label: "Gritty" },
-  { value: "dark", label: "Dark" },
-  { value: "lighthearted", label: "Lighthearted" },
+  { value: "heroic", label: "Heroic", hint: "Classic adventure. The heroes are heroes, good usually wins, and danger is exciting rather than grim." },
+  { value: "gritty", label: "Gritty", hint: "Grounded and harsh. Wounds hurt, money is tight, people are complicated, and victories cost something." },
+  { value: "dark", label: "Dark", hint: "Bleak and frightening. Cruel villains, tragic choices, and no promise of a happy ending." },
+  { value: "lighthearted", label: "Lighthearted", hint: "Playful and funny. Silly NPCs, comic mishaps and low stakes most of the time." },
 ];
 const LENGTH: Opt<GameSettings["length"]>[] = [
-  { value: "one_shot", label: "One-shot" },
-  { value: "short", label: "Short campaign" },
-  { value: "open", label: "Open-ended" },
+  { value: "one_shot", label: "One-shot", hint: "A single story the DM wraps up in about 3-5 sessions." },
+  { value: "short", label: "Short campaign", hint: "One main storyline with a clear ending." },
+  { value: "open", label: "Open-ended", hint: "No planned end. When one story finishes, the next one begins." },
 ];
 const DIFFICULTY: Opt<GameSettings["difficulty"]>[] = [
-  { value: "story", label: "Story", hint: "Gentle fights, plenty of healing" },
-  { value: "normal", label: "Normal" },
-  { value: "hard", label: "Hard" },
-  { value: "deadly", label: "Deadly", hint: "Smart monsters, little mercy" },
+  { value: "story", label: "Story", hint: "Gentle fights and plenty of healing, for enjoying the story." },
+  { value: "normal", label: "Normal", hint: "Fair fights that take some care, as the rules intend." },
+  { value: "hard", label: "Hard", hint: "Tougher, more numerous enemies. Rest and plan, or you'll go down." },
+  { value: "deadly", label: "Deadly", hint: "Smart monsters, little mercy. Characters will die if you play carelessly." },
 ];
 const DEATH: Opt<GameSettings["death_rule"]>[] = [
-  { value: "heroic", label: "Heroic", hint: "Knocked out, never killed" },
-  { value: "standard", label: "Standard death saves" },
-  { value: "permadeath", label: "Permadeath" },
+  { value: "heroic", label: "Heroic", hint: "At 0 hit points a character is knocked out, never killed." },
+  { value: "standard", label: "Standard death saves", hint: "At 0 hit points you make death saving throws: three successes and you're stable, three failures and you die. If the whole party falls, you wake later with 1 HP." },
+  { value: "permadeath", label: "Permadeath", hint: "Death saves as usual, but if the whole party falls, nobody gets back up. Death is final." },
 ];
 const REST: Opt<GameSettings["rest_rule"]>[] = [
-  { value: "standard", label: "Standard" },
-  { value: "gritty", label: "Gritty" },
-  { value: "epic", label: "Epic" },
+  { value: "standard", label: "Standard", hint: "Short rest: 1 hour. Long rest (full hit points and spell slots): 8 hours." },
+  { value: "gritty", label: "Gritty", hint: "Short rest: 8 hours. Long rest: a full week. Every fight wears you down." },
+  { value: "epic", label: "Epic", hint: "Short rest: a few minutes. Long rest: 1 hour. Recover fast and keep going." },
 ];
 const LEVELING: Opt<GameSettings["leveling"]>[] = [
-  { value: "xp", label: "XP" },
-  { value: "milestone", label: "Milestone" },
+  { value: "xp", label: "XP", hint: "Earn experience points for fights and deeds; level up when you have enough." },
+  { value: "milestone", label: "Milestone", hint: "The DM levels the whole party up together at big story moments." },
 ];
 const MAGIC: Opt<GameSettings["magic_level"]>[] = [
-  { value: "low", label: "Low" },
-  { value: "standard", label: "Standard" },
-  { value: "high", label: "High" },
+  { value: "low", label: "Low", hint: "Magic is rare: few potions in loot or shops and almost no magic items." },
+  { value: "standard", label: "Standard", hint: "The usual amount of potions and the occasional magic item." },
+  { value: "high", label: "High", hint: "Magic is everywhere: more potions, and magic items turn up in loot and shops much more often." },
 ];
 const ECONOMY: Opt<GameSettings["economy"]>[] = [
-  { value: "scarce", label: "Scarce" },
-  { value: "standard", label: "Standard" },
-  { value: "rich", label: "Rich" },
+  { value: "scarce", label: "Scarce", hint: "Shop prices are 25% higher and coin is hard to come by." },
+  { value: "standard", label: "Standard", hint: "Normal prices." },
+  { value: "rich", label: "Rich", hint: "Shop prices are 10% lower and the world is prosperous." },
 ];
 export const ROLLS: Opt<GameSettings["rolls"]>[] = [
   { value: "players", label: "Players roll on the site" },
@@ -99,7 +99,7 @@ export function Seg<T extends string>({
     <div>
       <div className="seg">
         {options.map((o) => (
-          <button key={o.value} type="button" className={o.value === value ? "active" : ""} onClick={() => onChange(o.value)}>
+          <button key={o.value} type="button" className={o.value === value ? "active" : ""} onClick={() => onChange(o.value)} title={o.hint}>
             {o.label}
           </button>
         ))}
@@ -215,9 +215,22 @@ export default function CreateGameModal({
     dm_engine: meta.engines.api_key ? "api_key" : meta.engines.claude_code ? "claude_code" : "offline",
     dm_model: meta.models[0]?.id ?? DEFAULT_SETTINGS.dm_model,
   });
-  const [charId, setCharId] = useState(characters.find((c) => (c.ruleset ?? "2014") === "2014")?.id ?? "");
+  const [charId, setCharId] = useState(characters.find((c) => (c.ruleset ?? "2014") === DEFAULT_SETTINGS.ruleset)?.id ?? "");
   const [plots, setPlots] = useState<CustomEntry[]>([]);
   const [plotId, setPlotId] = useState("");
+  const [presets, setPresets] = useState<PlotPreset[]>([]);
+  useEffect(() => {
+    api
+      .plotPresets()
+      .then(setPresets)
+      .catch(() => setPresets([]));
+  }, []);
+  const preset = presets.find((p) => p.id === plotId);
+  const pickPlot = (id: string) => {
+    setPlotId(id);
+    const p = presets.find((x) => x.id === id);
+    if (p?.suggest) setS((prev) => ({ ...prev, ...p.suggest })); // the story type and tone it plays best with
+  };
   useEffect(() => {
     api
       .customList()
@@ -272,20 +285,33 @@ export default function CreateGameModal({
             <Seg options={LENGTH} value={s.length} onChange={(v) => set("length", v)} />
           </Field>
           <Field label="Campaign plot">
-            {plots.length ? (
-              <select value={plotId} onChange={(e) => setPlotId(e.target.value)}>
-                <option value="">None: the DM invents the story</option>
-                {plots.map((pl) => (
-                  <option key={pl.id} value={pl.id}>
-                    {pl.name}
-                  </option>
-                ))}
-              </select>
-            ) : null}
+            <select value={plotId} onChange={(e) => pickPlot(e.target.value)}>
+              <option value="">None: the DM invents the story</option>
+              {presets.length > 0 && (
+                <optgroup label="Ready-made">
+                  {presets.map((p) => (
+                    <option key={p.id} value={p.id} title={p.pitch}>
+                      {p.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {plots.length > 0 && (
+                <optgroup label="My plots">
+                  {plots.map((pl) => (
+                    <option key={pl.id} value={pl.id} title={pl.description}>
+                      {pl.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+            </select>
             <div className="muted small hint">
-              {plots.length
-                ? "Your outline steers the DM. Players never see it."
-                : "Write your own story outline (villain, beats, secrets, twists) under My content → New entry → Campaign plot, and the DM will follow it."}
+              {preset
+                ? `${preset.pitch} (Story type and tone set to suit it; change them if you like.)`
+                : plotId
+                  ? "Your outline steers the DM. Players never see it."
+                  : "A plot is a secret story outline (villain, story beats, secrets, twists) that the DM follows while letting your choices bend it. Players never see it. Pick a ready-made one, write your own under My content → New entry → Campaign plot, or leave it to the DM."}
             </div>
           </Field>
         </fieldset>
@@ -339,8 +365,8 @@ export default function CreateGameModal({
             <Field label="Ruleset">
               <Seg
                 options={[
-                  { value: "2014", label: "2014 (SRD 5.1)" },
-                  { value: "2024", label: "2024 (SRD 5.2)", hint: "Background ability scores, origin feats, weapon mastery" },
+                  { value: "2014", label: "2014 (SRD 5.1)", hint: "The older rules: ability increases come from your race. Only 2014 characters can join." },
+                  { value: "2024", label: "2024 (SRD 5.2)", hint: "The newer rules: ability increases from your background, an origin feat and weapon mastery. Only 2024 characters can join." },
                 ]}
                 value={s.ruleset}
                 onChange={(v) => {
