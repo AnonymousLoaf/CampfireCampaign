@@ -647,7 +647,7 @@
   align-items: center;
   gap: 6px 8px;
   flex-wrap: wrap; /* in a narrow panel, the hint gets its own line and the buttons drop below it */
-  justify-content: flex-end; /* wrapped buttons all line up on the right */
+  justify-content: flex-start; /* wrapped buttons line up on the left */
 }
 .composer-row > span,
 .composer-row > .muted {

@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from "react";
-import { PINNED, activate, hidePanel, movePanel, resize, type Layout, type Node, type Pane, type PanelId, type Split, type Zone } from "./layout";
+import { PINNED, activate, hidePanel, movePanel, placeTab, resize, type Layout, type Node, type Pane, type PanelId, type Split, type Zone } from "./layout";
 
 export interface PanelDef {
   title: string;
@@ -128,6 +128,7 @@ function zoneAt(e: React.DragEvent, el: HTMLElement): Zone {
 function PaneView({ pane, ctx }: { pane: Pane; ctx: DockCtx }) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const [zone, setZone] = useState<Zone | null>(null);
+  const [slot, setSlot] = useState<number | null>(null); // where a dragged tab would land in this strip
   const def = ctx.panels[pane.active];
   const isDragging = !!ctx.dragging;
   const drop = (z: Zone) => {
@@ -143,22 +144,38 @@ function PaneView({ pane, ctx }: { pane: Pane; ctx: DockCtx }) {
         onDragOver={(e) => {
           if (!isDragging) return;
           e.preventDefault();
-          setZone("center");
+          if (slot !== pane.tabs.length) setSlot(pane.tabs.length); // empty space after the last tab
         }}
-        onDragLeave={() => setZone(null)}
+        onDragLeave={(e) => {
+          if (!(e.relatedTarget instanceof window.Node && e.currentTarget.contains(e.relatedTarget))) setSlot(null);
+        }}
         onDrop={(e) => {
           e.preventDefault();
-          drop("center");
+          const pid = ctx.dragging;
+          const at = slot ?? pane.tabs.length;
+          ctx.setDragging(null);
+          setSlot(null);
+          if (pid) ctx.onChange(placeTab(ctx.layout, pid, pane.id, at));
         }}
       >
-        {pane.tabs.map((t) => {
+        {pane.tabs.map((t, i) => {
           const d = ctx.panels[t];
           return (
             <button
               key={t}
-              className={`dock-tab ${t === pane.active ? "active" : ""}`}
+              className={`dock-tab ${t === pane.active ? "active" : ""} ${slot === i ? "drop-before" : ""} ${
+                slot === i + 1 && i === pane.tabs.length - 1 ? "drop-after" : ""
+              }`}
               draggable
-              title="Drag to move: onto another pane's edge to give it its own space, or onto its middle to add it as a tab"
+              title="Drag to move: between tabs to reorder, onto another pane's edge to give it its own space, or onto its middle to add it as a tab"
+              onDragOver={(e) => {
+                if (!isDragging) return;
+                e.preventDefault();
+                e.stopPropagation();
+                const r = e.currentTarget.getBoundingClientRect();
+                const s = e.clientX < r.left + r.width / 2 ? i : i + 1;
+                if (s !== slot) setSlot(s);
+              }}
               onClick={() => ctx.onChange(activate(ctx.layout, pane.id, t))}
               onDragStart={(e) => {
                 e.dataTransfer.setData(DND_TYPE, t);
@@ -167,7 +184,10 @@ function PaneView({ pane, ctx }: { pane: Pane; ctx: DockCtx }) {
                 // let the drag image render before the overlays appear
                 window.setTimeout(() => ctx.setDragging(t), 0);
               }}
-              onDragEnd={() => ctx.setDragging(null)}
+              onDragEnd={() => {
+                ctx.setDragging(null);
+                setSlot(null);
+              }}
             >
               <span className="dock-tab-icon">{d.icon}</span>
               <span className="dock-tab-title">{d.title}</span>

@@ -115,6 +115,13 @@ body.resizing-row * {
   border-bottom-color: var(--gold);
   background: rgba(216, 169, 74, 0.06);
 }
+/* where a dragged tab will land */
+.dock-tab.drop-before {
+  box-shadow: inset 3px 0 0 var(--gold);
+}
+.dock-tab.drop-after {
+  box-shadow: inset -3px 0 0 var(--gold);
+}
 .dock-tab-icon {
   font-size: 0.9em;
 }

@@ -131,6 +131,25 @@ export function movePanel(layout: Layout, pid: PanelId, targetPaneId: string, zo
   return l;
 }
 
+/** Put a tab at a position in a pane's tab strip: reorders within a pane, or moves it in from another pane. */
+export function placeTab(layout: Layout, pid: PanelId, paneId: string, index: number): Layout {
+  const l = clone(layout);
+  const target = panes(l.root).find((p) => p.id === paneId);
+  if (!target) return layout;
+  const from = target.tabs.indexOf(pid);
+  if (from >= 0) {
+    if (index === from || index === from + 1) return layout; // dropped where it already is
+    target.tabs.splice(from, 1);
+    if (from < index) index--;
+  } else {
+    detach(l, pid);
+  }
+  target.tabs.splice(Math.max(0, Math.min(index, target.tabs.length)), 0, pid);
+  target.active = pid;
+  l.root = normalize(l.root) ?? pane(["composer"]);
+  return l;
+}
+
 export function hidePanel(layout: Layout, pid: PanelId): Layout {
   if (PINNED.includes(pid)) return layout;
   const l = clone(layout);
