@@ -489,10 +489,9 @@ def make_item(key: str, qty: int = 1, equipped: bool = False, custom: dict | Non
 
 def add_item(sheet: dict, key: str, qty: int = 1, equipped: bool = False, custom: dict | None = None) -> dict:
     inv = sheet.setdefault("inventory", [])
-    stackable = not equipped and not _is_equippable(key, custom)
-    if stackable:
+    if not equipped and not custom:  # spare copies stack ("Handaxe ×4"); an equipped one keeps its own line
         for it in inv:
-            if it["key"] == key and not it.get("custom") and not custom:
+            if it["key"] == key and not it.get("custom") and not it.get("equipped"):
                 it["qty"] += qty
                 return it
     entry = make_item(key, qty, equipped, custom)
@@ -563,6 +562,25 @@ def equip(sheet: dict, item_id: str, equipped: bool) -> None:
             sheet["inventory"].append(make_item(it["key"], 1, True, it.get("custom")))
             return
     it["equipped"] = equipped
+    if not equipped and not it.get("custom"):  # back into the pack: rejoin the stack of spares
+        spare = next((o for o in sheet["inventory"] if o is not it and o["key"] == it["key"] and not o.get("custom")
+                      and not o.get("equipped")), None)
+        if spare:
+            spare["qty"] += it["qty"]
+            sheet["inventory"].remove(it)
+
+
+def stack_inventory(sheet: dict) -> None:
+    """Merge duplicate lines of the same unequipped item (old saves listed each weapon separately)."""
+    out: list[dict] = []
+    for it in sheet.get("inventory", []):
+        same = None if it.get("equipped") or it.get("custom") else next(
+            (o for o in out if o["key"] == it["key"] and not o.get("equipped") and not o.get("custom")), None)
+        if same:
+            same["qty"] += it["qty"]
+        else:
+            out.append(it)
+    sheet["inventory"] = out
 
 
 # ── creation ────────────────────────────────────────────────────────────────
