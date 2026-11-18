@@ -120,6 +120,48 @@ class Ctx:
     def log(self, kind: str, text: str, author: str | None = None, data: dict | None = None) -> None:
         if text:
             self.logs.append((kind, author, text, data))
+            if kind == "combat" and data and not data.get("to_hit_only"):
+                self._track(data)
+
+    # ── campaign stats (for the epilogue) ──
+    def bump(self, cid: str, key: str, n: int = 1) -> None:
+        st = self.state.setdefault("stats", {}).setdefault(cid, {})
+        st[key] = st.get(key, 0) + n
+
+    def _track(self, data: dict) -> None:
+        enc = self.state.get("encounter")
+        if not enc:
+            return
+        toks = enc.get("tokens") or {}
+        a, t = toks.get(data.get("attacker")), toks.get(data.get("target"))
+        dmg = max(0, int(data.get("damage") or 0))
+        if a and a.get("kind") == "pc" and a.get("character_id"):
+            cid = a["character_id"]
+            if "hit" in data:
+                self.bump(cid, "attacks")
+                if data.get("hit"):
+                    self.bump(cid, "hits")
+                if data.get("crit"):
+                    self.bump(cid, "crits")
+                nat = (data.get("roll") or {}).get("natural")
+                if nat == 20:
+                    self.bump(cid, "nat20")
+                elif nat == 1:
+                    self.bump(cid, "nat1")
+            if dmg:
+                self.bump(cid, "damage_dealt", dmg)
+            if t and t.get("kind") != "pc" and t.get("hp", 1) <= 0 and not t.get("_kill_counted"):
+                t["_kill_counted"] = True
+                self.bump(cid, "kills")
+        for tok in toks.values():  # back on their feet: a later fall counts again
+            if tok.get("kind") == "pc" and tok.get("_down_counted") and (self.chars.get(tok.get("character_id")) or {}).get("hp", 0) > 0:
+                tok.pop("_down_counted")
+        if t and t.get("kind") == "pc" and t.get("character_id") in self.chars and dmg:
+            cid = t["character_id"]
+            self.bump(cid, "damage_taken", dmg)
+            if self.chars[cid].get("hp", 1) <= 0 and not t.get("_down_counted"):
+                t["_down_counted"] = True
+                self.bump(cid, "downs")
 
     def log_lines(self, lines: list[dict]) -> None:
         for l in lines:
@@ -298,6 +340,17 @@ def load(db: Session, game_id: str) -> Ctx:
 
 # ── view ────────────────────────────────────────────────────────────────────
 
+def _epilogue_view(ctx: Ctx) -> dict | None:
+    ep = ctx.state.get("epilogue")
+    if not ep:
+        return None
+    out = {k: ep.get(k) for k in ("status", "title", "text", "error", "written_at")}
+    out["characters"] = ep.get("characters") or {}
+    out["stats"] = ep.get("stats") or {}
+    out["party"] = ep.get("party") or {}
+    return out
+
+
 def build_view(db: Session, ctx: Ctx, uid: str | None, tv: bool = False) -> dict:
     game = ctx.game
     p = ctx.phase
@@ -384,6 +437,10 @@ def build_view(db: Session, ctx: Ctx, uid: str | None, tv: bool = False) -> dict
         "npcs": [{**{k: v for k, v in n.items() if k != "art"},
                   "portrait_url": art_url(n.get("art"))} for n in ctx.state.get("npcs", [])],
         "quests": ctx.state.get("quests", []),
+        "journal": ctx.state.get("journal", []),
+        "party_notes": ctx.state.get("party_notes", []),
+        "story_complete": bool(ctx.state.get("story_complete")),
+        "epilogue": _epilogue_view(ctx),
         "log": [{"id": l.id, "ts": iso(l.ts), "kind": l.kind, "author": l.author, "text": l.text, "data": l.data}
                 for l in logs],
         "dm": {"engine": ctx.settings.get("dm_engine"), "model": ctx.settings.get("dm_model"), "busy": bool(game.dm_busy)},

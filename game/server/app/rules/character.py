@@ -151,6 +151,12 @@ def prep_options(sheet: dict) -> list[str]:
     return [i for i in class_spell_list(sheet["class"], msl, 1, rs(sheet)) if i not in always] if msl else []
 
 
+def can_change_prepared(sheet: dict) -> bool:
+    """Prepared casters change their list after a long rest (or a level up); it locks once they spend a spell slot or a
+    fight starts. A character who has never been locked (new to the game) may still set it up."""
+    return prepared_max(sheet) is not None and bool(sheet.get("prep_open", True))
+
+
 def prepare(sheet: dict, spells: list[str]) -> None:
     mx = prepared_max(sheet)
     if mx is None:
@@ -205,6 +211,7 @@ def pact_slots(sheet: dict) -> dict | None:
 
 def use_slot(sheet: dict, level: int) -> int:
     """Spend a slot of at least `level`; returns the level actually used (warlocks always cast at pact level)."""
+    sheet["prep_open"] = False  # casting locks in today's prepared spells until the next long rest
     pact = pact_slots(sheet)
     if pact:
         if level > pact["level"]:
@@ -1142,6 +1149,8 @@ def level_up(sheet: dict, choices: dict | None = None) -> dict:
     elif new_s:
         sheet["spells"].setdefault("spells", []).extend(new_s)
     _grant_features(sheet, sheet["level"])
+    if prepared_max(sheet) is not None:
+        sheet["prep_open"] = True  # a new level: new spells to prepare
     return {"level": sheet["level"], "hp_gained": gain}
 
 
@@ -1453,6 +1462,7 @@ def view(char_id: str, owner_id: str, game_id: str | None, sheet: dict) -> dict:
             "cantrips": [spell_card(i, ruleset) for i in all_cantrips(sheet)],
             "spells": [spell_card(i, ruleset) for i in ready_spells(sheet)],
             "prepares": bool(sc and sc.get("prepares")), "prepared_max": prepared_max(sheet) if sc else None,
+            "prep_open": can_change_prepared(sheet),
             "known": bool(sc and sc.get("known")),
             "spellbook": [spell_card(i, ruleset) for i in sheet["spells"].get("spellbook", [])] if sc and sc.get("spellbook") else None,
             "options": [spell_card(i, ruleset) for i in prep_options(sheet)] if sc else [],
@@ -1596,4 +1606,6 @@ def long_rest(sheet: dict) -> dict:
     sheet["conditions"] = [c for c in sheet["conditions"] if c not in TEMP_CONDITIONS]
     sheet["temp_hp"] = 0
     sheet["concentration"] = None
+    if prepared_max(sheet) is not None:
+        sheet["prep_open"] = True  # prepared casters may change their list after a long rest
     return {"healed": healed}

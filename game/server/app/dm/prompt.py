@@ -209,6 +209,14 @@ def turn_message(ctx: Ctx, reason: str, body: str, recent: list[tuple[str, str |
         out.append("## Quests")
         for q in st["quests"][-15:]:
             out.append(f"- [{q['status']}] {q['title']}: {q.get('notes', '')}")
+    if st.get("journal"):
+        out.append("")
+        out.append("## Party journal (what the players have written down for them; add with the journal tool)")
+        for e in st["journal"][-15:]:
+            out.append(f"- [{e['kind']}, day {e.get('day', '?')}] {e['text']}")
+    if st.get("story_complete"):
+        out.append("")
+        out.append("## The main story is complete; the host may close the campaign. Keep playing until they do.")
     enc = st.get("encounter")
     if enc:
         out.append("")

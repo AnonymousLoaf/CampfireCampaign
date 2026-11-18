@@ -57,6 +57,8 @@ def start(specs: list[tuple[str, int]], terrain: str, party: list[tuple[str, dic
     """party: [(character_id, sheet)] — living characters only. `premade`: a map to fight on (the scene map) instead
     of a generated one; `pc_spots` {character_id: (x, y)} and `foe_spots` [(x, y)] say where each side starts."""
     rng = random.Random(seed)
+    for _, s in party:
+        s["prep_open"] = False  # prepared spells are locked in once a fight starts
     m = premade or bm.generate(terrain if terrain in bm.TERRAINS else "road", seed)
     enc = {**m, "round": 1, "mode": mode if mode in ("side", "classic") else "side", "death_rule": death_rule,
            "ruleset": ruleset,

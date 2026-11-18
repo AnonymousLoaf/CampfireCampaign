@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { api } from "../../api/client";
 import { navigate } from "../../router";
 import { PHASE_LABEL, formatCountdown, useNow } from "../../util/format";
@@ -6,7 +6,7 @@ import { useGame } from "./gameContext";
 import InviteByEmail from "./InviteByEmail";
 import PlotPicker from "./PlotPicker";
 
-export default function GameHeader({ onSettings, onTv }: { onSettings: () => void; onTv: () => void }) {
+export default function GameHeader({ onSettings, onTv, extra }: { onSettings: () => void; onTv: () => void; extra?: ReactNode }) {
   const { view, gameId, run } = useGame();
   const now = useNow(1000);
   const [liveMenu, setLiveMenu] = useState(false);
@@ -119,6 +119,7 @@ export default function GameHeader({ onSettings, onTv }: { onSettings: () => voi
             Force resolve
           </button>
         )}
+        {extra}
         {host && (
           <>
             <button className="btn ghost small" onClick={onTv} title="Big-screen view for a TV">

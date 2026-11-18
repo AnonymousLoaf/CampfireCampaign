@@ -42,6 +42,14 @@ RECAP_SYSTEM = ("You summarise a D&D campaign's recent events for a player who w
                  "plain prose in past tense: what happened, where the party is now, and what is waiting on them. "
                  "No headings, no lists, no invented details.")
 
+EPILOGUE_SYSTEM = ("You are the Dungeon Master closing a finished D&D campaign. Write its epilogue for the players: "
+                   "what became of the world and the people they met, and of each hero in the years after. Draw on "
+                   "what really happened (their deeds, choices, boons, losses and threads); invent only the "
+                   "aftermath. Warm, vivid, past tense; give each hero a distinct fate that fits their story. Fallen "
+                   "heroes get a fitting remembrance. Reply with JSON only, no code fences: "
+                   '{"title": "a short evocative title", "epilogue": "2-4 paragraphs about the world and the party", '
+                   '"characters": {"<exact character name>": "one paragraph: what became of them"}}')
+
 STORY_SYSTEM = ("You keep the 'story so far' for a D&D campaign, read by its players. You get your previous write-up "
                 "(if any) and everything that has happened since. Rewrite the whole story so far as a summary in plain "
                 "past-tense prose: a short paragraph per chapter of the adventure (arrival, a quest taken, a fight, a "
@@ -55,6 +63,8 @@ class OfflineEngine:
     name = "offline"
 
     async def summarize(self, system: str, user: str) -> str:
+        if system is EPILOGUE_SYSTEM:
+            return ""  # the caller builds a plain epilogue from the story so far
         if system is STORY_SYSTEM:  # no AI: the opening lines of each narration, oldest first
             prev = user.split("\n\nWhat has happened since", 1)[0].split(":\n", 1)[-1].strip()
             prev = "" if prev.startswith("(none") else prev

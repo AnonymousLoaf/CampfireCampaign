@@ -1389,6 +1389,9 @@ async def game_prepare(gid: str, body: PrepareBody, u: User = Depends(current_us
         if ctx.phase.get("type") == "combat":
             raise RulesError("prepare spells after the fight")
         cid = ctx.resolve_char(u.id, body.character_id)
+        if ctx.game.status == "active" and not ch.can_change_prepared(ctx.chars[cid]):
+            raise RulesError("you can change your prepared spells after a long rest or a level up (the list locks "
+                             "once you cast a spell or a fight starts)")
         ch.prepare(ctx.chars[cid], body.spells)
     return await mutate(gid, u, fn)
 
@@ -1700,6 +1703,177 @@ async def recap(gid: str, u: User = Depends(current_user)):
         return {"text": text}
     finally:
         db.close()
+
+
+# ── party notes (the players' own lines in the journal; the DM never sees them) ──
+class NoteBody(BaseModel):
+    text: str = Field(min_length=1, max_length=1000)
+
+
+@router.post("/games/{gid}/notes")
+async def add_note(gid: str, body: NoteBody, u: User = Depends(current_user)):
+    def fn(ctx: Ctx):
+        if (_member(ctx, u).role or "") == "spectator":
+            raise RulesError("spectators can't write in the journal")
+        notes = ctx.state.setdefault("party_notes", [])
+        notes.append({"id": secrets.token_hex(4), "user_id": u.id, "author": u.display_name,
+                      "text": body.text.strip()[:1000], "ts": datetime.now(timezone.utc).isoformat()})
+        del notes[:-300]
+    return await mutate(gid, u, fn, allow_busy=True)
+
+
+@router.delete("/games/{gid}/notes/{nid}")
+async def delete_note(gid: str, nid: str, u: User = Depends(current_user)):
+    def fn(ctx: Ctx):
+        notes = ctx.state.get("party_notes") or []
+        n = next((x for x in notes if x["id"] == nid), None)
+        if not n:
+            raise RulesError("note not found")
+        if n["user_id"] != u.id and ctx.game.host_id != u.id:
+            raise RulesError("only its writer or the host can remove a note")
+        notes.remove(n)
+    return await mutate(gid, u, fn, allow_busy=True)
+
+
+# ── ending the campaign: an epilogue for the world and each hero, with their stats ──
+EPILOGUE_STALE_SECONDS = 600
+
+
+@router.post("/games/{gid}/end")
+async def end_campaign(gid: str, u: User = Depends(current_user)):
+    def fn(ctx: Ctx):
+        _host(ctx, u)
+        if ctx.game.status == "lobby":
+            raise RulesError("the game hasn't started")
+        if ctx.encounter:
+            raise RulesError("finish the fight first")
+        ep = ctx.state.get("epilogue") or {}
+        if ep.get("status") == "done":
+            raise RulesError("this campaign has already ended")
+        if ep.get("status") == "writing":
+            started = datetime.fromisoformat(ep.get("started_at") or "2000-01-01T00:00:00+00:00")
+            if (datetime.now(timezone.utc) - started).total_seconds() < EPILOGUE_STALE_SECONDS:
+                raise RulesError("the epilogue is already being written")
+        ctx.state["epilogue"] = {"status": "writing", "started_at": datetime.now(timezone.utc).isoformat(),
+                                 "resume_phase": ep.get("resume_phase") or ctx.phase.get("type")}
+        ctx.open_phase("dm", "The DM is writing the epilogue…")
+        ctx.log("event", "The host is closing the campaign. The DM is writing the epilogue…")
+    out = await mutate(gid, u, fn)
+    flow.spawn(write_epilogue(gid))
+    return out
+
+
+def _party_stats(ctx: Ctx) -> dict:
+    sc = ctx.state.get("scene") or {}
+    return {"days": sc.get("day", 1),
+            "quests_done": sum(1 for q in ctx.state.get("quests", []) if q.get("status") == "done"),
+            "quests_failed": sum(1 for q in ctx.state.get("quests", []) if q.get("status") == "failed"),
+            "npcs_met": len(ctx.state.get("npcs", [])),
+            "places": sum(1 for e in ctx.state.get("journal", []) if e.get("kind") == "place")}
+
+
+def _epilogue_brief(ctx: Ctx) -> str:
+    st = ctx.state
+    out = [f"Campaign: {ctx.game.name}"]
+    plot = st.get("plot") or {}
+    if plot:
+        out.append(f"Plot: {plot.get('name', '')}. Premise: {plot.get('premise', '')} Intended ending: {plot.get('ending', '')}")
+    if st.get("story_complete"):
+        out.append(f"How the DM says it ended: {st['story_complete'].get('note') or '(no note)'}")
+    out.append(f"Story so far (players' summary): {(st.get('story_summary') or {}).get('text') or '(none)'}")
+    out.append(f"DM's running summary: {ctx.summary or '(none)'}")
+    out.append("\nThe heroes:")
+    for cid, s in ctx.party():
+        gifts = [c.get("name", "") for c in s.get("custom", []) if c.get("source") == "dm"]
+        stat = st.get("stats", {}).get(cid, {})
+        out.append(f"- {s['name']}: level {s['level']} {s.get('race', '')} {s['class']}, {s.get('background', '')}"
+                   f"{' (DEAD)' if s.get('dead') else ''}. Earned: {', '.join(gifts) or 'nothing special'}. "
+                   f"Kills {stat.get('kills', 0)}, times dropped {stat.get('downs', 0)}. "
+                   f"Backstory: {(s.get('backstory') or '')[:400]}")
+    out.append("\nQuests: " + "; ".join(f"{q['title']} ({q['status']})" for q in st.get("quests", [])) or "none")
+    out.append("People met: " + "; ".join(f"{n['name']} ({n.get('role', '')}, {n.get('attitude', '')})"
+                                          for n in st.get("npcs", [])[-25:]))
+    moments = [e["text"] for e in st.get("journal", []) if e.get("kind") == "moment"][-15:]
+    if moments:
+        out.append("Key moments: " + " | ".join(moments))
+    rows = list(ctx.db.scalars(select(LogEntry).where(LogEntry.game_id == ctx.game.id, LogEntry.kind == "narration")
+                               .order_by(LogEntry.id.desc()).limit(8)))
+    rows.reverse()
+    out.append("\nThe final scenes (oldest first):")
+    out += [f"- {r.text[:1500]}" for r in rows]
+    return "\n".join(out)
+
+
+def _parse_epilogue(text: str) -> dict | None:
+    t = (text or "").strip()
+    a, b = t.find("{"), t.rfind("}")
+    if a < 0 or b <= a:
+        return None
+    try:
+        d = json.loads(t[a:b + 1])
+    except ValueError:
+        return None
+    return d if isinstance(d, dict) and d.get("epilogue") else None
+
+
+async def write_epilogue(gid: str) -> None:
+    from .dm import engines as eng
+    from .game import voices
+    db = SessionLocal()
+    try:
+        ctx = load(db, gid)
+        brief = _epilogue_brief(ctx)
+        err = None
+        parsed = None
+        try:
+            parsed = _parse_epilogue(await flow._engine_for(ctx).summarize(eng.EPILOGUE_SYSTEM, brief))
+        except eng.DMError as e:
+            err = str(e)
+        except Exception as e:  # noqa: BLE001 (never leave the game stuck on "writing")
+            log.exception("epilogue failed for %s", gid)
+            err = str(e)
+        if not parsed and not err and isinstance(flow._engine_for(ctx), eng.OfflineEngine):
+            story = (ctx.state.get("story_summary") or {}).get("text") or ctx.summary or "The tale is told."
+            parsed = {"title": "The Tale Is Told", "epilogue": story, "characters": {}}
+        if not parsed and not err:
+            err = "the DM's epilogue couldn't be read; try again"
+    finally:
+        db.close()
+    async with lock_for(gid):
+        db = SessionLocal()
+        try:
+            ctx = load(db, gid)
+            ep = ctx.state.get("epilogue") or {}
+            if err:
+                ctx.state["epilogue"] = {"status": "error", "error": err[:300], "resume_phase": ep.get("resume_phase")}
+                ctx.open_phase(ep.get("resume_phase") if ep.get("resume_phase") in ("exploration", "shop") else "exploration",
+                               "The epilogue couldn't be written. Play on, or the host can try again.")
+                ctx.log("event", f"The epilogue couldn't be written ({err[:200]}). The host can try again.")
+                ctx.save()
+                await flow.changed(ctx)
+                return
+            by_name = {s["name"].strip().lower(): cid for cid, s in ctx.party()}
+            fates = {}
+            for name, txt in (parsed.get("characters") or {}).items():
+                cid = by_name.get(str(name).strip().lower())
+                if cid and isinstance(txt, str):
+                    fates[cid] = txt.strip()[:3000]
+            title = str(parsed.get("title") or "Epilogue").strip()[:120]
+            text = str(parsed.get("epilogue")).strip()[:8000]
+            ctx.state["epilogue"] = {"status": "done", "title": title, "text": text, "characters": fates,
+                                     "stats": ctx.state.get("stats", {}), "party": _party_stats(ctx),
+                                     "written_at": datetime.now(timezone.utc).isoformat()}
+            ctx.open_phase("ended")
+            ctx.game.status = "ended"
+            ctx.log("narration", f"Epilogue: {title}\n\n{text}", data={"epilogue": True})
+            ctx.save()
+            await flow.changed(ctx)
+            nid = db.scalar(select(LogEntry.id).where(LogEntry.game_id == gid, LogEntry.kind == "narration")
+                            .order_by(LogEntry.id.desc()).limit(1))
+            if nid:
+                flow.spawn(voices.voice_narration(gid, nid))
+        finally:
+            db.close()
 
 
 _story_locks: dict[str, asyncio.Lock] = {}

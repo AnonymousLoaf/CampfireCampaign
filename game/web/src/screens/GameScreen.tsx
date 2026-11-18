@@ -1,4 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Dock, { type PanelDef } from "../components/game/dock/Dock";
+import LayoutMenu from "../components/game/dock/LayoutMenu";
+import { findPaneOf, loadLayout, reveal, saveLayout, type Layout, type PanelId } from "../components/game/dock/layout";
+import { CharPanel, NpcList } from "../components/game/SheetTabs";
+import Journal from "../components/game/Journal";
+import { EpilogueBar, EpilogueModal, useEpilogueAutoOpen } from "../components/game/Epilogue";
 import { api } from "../api/client";
 import type { GameView, Me, Token } from "../api/types";
 import { emitChat, subscribe } from "../api/ws";
@@ -150,6 +156,15 @@ function GameLoaded({
     setComposerOpen(false);
   }, [view.phase.id, view.phase.my_submission?.updated_at]);
   const [feedTab, setFeedTab] = useState<"live" | "story" | "chat">("live");
+  // Desktop: docked, resizable panels arranged by the player (saved on this device).
+  const [layout, setLayoutState] = useState<Layout>(loadLayout);
+  const setLayout = useCallback((l: Layout) => {
+    setLayoutState(l);
+    saveLayout(l);
+  }, []);
+  const [epilogueOpen, setEpilogueOpen] = useState(false);
+  const openEpilogue = useCallback(() => setEpilogueOpen(true), []);
+  useEpilogueAutoOpen(gameId, view.epilogue?.status === "done", openEpilogue);
   const chatUnseen = view.me.chat_unseen ?? 0;
   const spectator = view.me.role === "spectator";
   useGameEffects(view);
@@ -183,6 +198,7 @@ function GameLoaded({
   useEffect(() => {
     setMapTab(hasEncounter ? "battle" : view.scene_map ? "scene" : "world");
     if (hasEncounter && isMobile && !spectator) setMobileTab("map");
+    if (hasEncounter && !isMobile) setLayoutState((l) => reveal(l, "map"));
   }, [hasEncounter]); // eslint-disable-line react-hooks/exhaustive-deps
   // A new scene map (the DM drew one, or cleared it) switches the tab outside fights.
   const sceneKey = view.scene_map ? `${view.scene_map.title ?? ""}|${view.scene_map.grid.w}x${view.scene_map.grid.h}` : "";
@@ -322,6 +338,10 @@ function GameLoaded({
         onSelect={(id) => {
           setViewedId(id);
           if (isMobile) setMobileTab("sheet");
+          else {
+            const showing = (["sheet", "inventory", "spells"] as PanelId[]).some((p) => findPaneOf(layout.root, p)?.active === p);
+            if (!showing && findPaneOf(layout.root, "sheet")) setLayout(reveal(layout, "sheet"));
+          }
         }}
         onNudge={view.me.is_host ? (uid) => void run(() => api.nudge(gameId, uid)) : undefined}
         onRemove={
@@ -340,6 +360,27 @@ function GameLoaded({
   );
   const sheetEl = <SheetTabs viewedId={viewedId} onViewed={setViewedId} />;
   const feedBusy = view.dm.busy || view.phase.type === "dm";
+  const liveInner = (
+    <>
+      <EpilogueBar onOpen={openEpilogue} />
+      <CatchUp onMarkRead={() => markSeen(true)} />
+      <StoryFeed log={view.log} busy={feedBusy} lastSeenId={view.me.last_seen_id ?? null} onAtBottom={() => markSeen()} />
+    </>
+  );
+  const skyEl = (
+    <div className="feed-sky">
+      <SkyStrip scene={enc ? { ...view.scene, type: enc.terrain } : view.scene} height={52} />
+      <div className="feed-sky-overlay">
+        <span className="sky-caption">
+          {view.scene ? `Day ${view.scene.day} · ${view.scene.time_of_day}${view.scene.weather ? ` · ${view.scene.weather}` : ""}` : ""}
+        </span>
+        <span className="row gap center">
+          <AutoReadToggle />
+          <SoundChip />
+        </span>
+      </div>
+    </div>
+  );
   const feedEl = (
     <div className="feed-wrap atmos">
       <SceneBackdrop scene={view.scene} terrain={enc?.terrain ?? null} art={view.scene_art} />
@@ -381,15 +422,7 @@ function GameLoaded({
       {feedTab === "chat" ? (
         <ChatPanel gameId={gameId} view={view} onSeen={refresh} />
       ) : feedTab === "live" ? (
-        <>
-          <CatchUp onMarkRead={() => markSeen(true)} />
-          <StoryFeed
-            log={view.log}
-            busy={feedBusy}
-            lastSeenId={view.me.last_seen_id ?? null}
-            onAtBottom={() => markSeen()}
-          />
-        </>
+        liveInner
       ) : (
         <div className="story-feed">
           <StoryHistory />
@@ -484,11 +517,77 @@ function GameLoaded({
     },
   ];
 
+  const levelUpReady = controls.some((id) => view.characters[id]?.pending_level_up);
+  const prepReady = controls.some((id) => {
+    const sc = view.characters[id]?.spellcasting;
+    return !!sc?.prepares && !!sc.prep_open && view.game.status === "active" && sc.spells.length === 0;
+  });
+  const activeQuests = view.quests.filter((q) => q.status === "active").length;
+  const unseen = view.me.unseen_count ?? 0;
+  const panels: Record<PanelId, PanelDef> = {
+    party: { title: "Party", icon: "👥", bodyClass: "panel-pad", render: () => partyEl },
+    sheet: {
+      title: "Sheet",
+      icon: "📋",
+      badge: levelUpReady ? "✦" : undefined,
+      bodyClass: "panel-pad",
+      render: () => <CharPanel which="sheet" viewedId={viewedId} onViewed={setViewedId} />,
+    },
+    inventory: { title: "Inventory", icon: "🎒", bodyClass: "panel-pad", render: () => <CharPanel which="inventory" viewedId={viewedId} onViewed={setViewedId} /> },
+    spells: {
+      title: "Spells",
+      icon: "✨",
+      badge: prepReady ? "✦" : undefined,
+      bodyClass: "panel-pad",
+      render: () => <CharPanel which="spells" viewedId={viewedId} onViewed={setViewedId} />,
+    },
+    journal: { title: "Journal", icon: "📖", badge: activeQuests || undefined, bodyClass: "panel-pad", render: () => <Journal /> },
+    npcs: { title: "NPCs", icon: "🧑", bodyClass: "panel-pad", render: () => <NpcList /> },
+    map: { title: enc ? `Battle · round ${enc.round}` : "Map", icon: enc ? "⚔" : "🗺", badge: myTurn ? "!" : undefined, bodyClass: "panel-fill", render: () => mapEl },
+    live: {
+      title: "Story",
+      icon: "📜",
+      badge: unseen > 0 ? unseen : undefined,
+      bodyClass: "panel-fill",
+      render: () => (
+        <div className="feed-wrap atmos">
+          <SceneBackdrop scene={view.scene} terrain={enc?.terrain ?? null} art={view.scene_art} />
+          {skyEl}
+          {liveInner}
+        </div>
+      ),
+    },
+    story: {
+      title: "Story so far",
+      icon: "📚",
+      bodyClass: "panel-fill",
+      render: () => (
+        <div className="feed-wrap">
+          <div className="story-feed">
+            <StoryHistory />
+          </div>
+        </div>
+      ),
+    },
+    chat: { title: "Chat", icon: "💬", badge: chatUnseen > 0 ? chatUnseen : undefined, bodyClass: "panel-fill", render: () => <ChatPanel gameId={gameId} view={view} onSeen={refresh} /> },
+    composer: {
+      title: "Your move",
+      icon: "✎",
+      badge: !spectator && (bar.urgent || waitingOnMe) ? "!" : undefined,
+      bodyClass: "panel-composer",
+      render: () => composer,
+    },
+  };
+
   return (
     <GameContext.Provider value={ctx}>
       <div className={`game-screen atmos ${isMobile ? "mobile" : ""}`}>
         <SceneBackdrop scene={view.scene} terrain={enc?.terrain ?? null} subtle art={view.scene_art} />
-        <GameHeader onSettings={() => setModal("settings")} onTv={() => setModal("tv")} />
+        <GameHeader
+          onSettings={() => setModal("settings")}
+          onTv={() => setModal("tv")}
+          extra={!isMobile ? <LayoutMenu layout={layout} onChange={setLayout} panels={panels} /> : undefined}
+        />
         {view.phase.error && (
           <div className="banner error">
             The DM ran into a problem: {view.phase.error} {view.me.is_host ? "— use Retry DM in the header." : "— the host can retry."}
@@ -536,17 +635,7 @@ function GameLoaded({
             </nav>
           </>
         ) : (
-          <div className="game-grid">
-            <aside className="game-left">
-              {partyEl}
-              {sheetEl}
-            </aside>
-            {mapEl}
-            <section className="game-right">
-              {feedEl}
-              {composer}
-            </section>
-          </div>
+          <Dock layout={layout} onChange={setLayout} panels={panels} />
         )}
 
         {modal === "shop" && <ShopModal onClose={() => setModal(null)} />}
@@ -563,6 +652,7 @@ function GameLoaded({
             onClose={() => setLevelUpFor(null)}
           />
         )}
+        {epilogueOpen && <EpilogueModal onClose={() => setEpilogueOpen(false)} />}
         {toast && (
           <div className="toast" onClick={clearToast}>
             {toast}

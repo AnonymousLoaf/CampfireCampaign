@@ -241,6 +241,8 @@ export interface CharacterSpellcasting {
   // M2
   prepares?: boolean;
   prepared_max?: number | null;
+  /** Prepared casters: the list can change now (after a long rest or a level up; it locks on the first cast or fight). */
+  prep_open?: boolean;
   known?: boolean;
   spellbook?: Spell[] | null;
   options?: Spell[];
@@ -752,6 +754,47 @@ export interface Member {
   away_until?: string | null;
 }
 
+export interface JournalEntry {
+  id: string;
+  kind: "clue" | "place" | "moment";
+  text: string;
+  day?: number;
+  quest?: string;
+}
+
+export interface PartyNote {
+  id: string;
+  user_id: string;
+  author: string;
+  text: string;
+  ts: string;
+}
+
+export interface CampaignStats {
+  attacks?: number;
+  hits?: number;
+  crits?: number;
+  nat20?: number;
+  nat1?: number;
+  damage_dealt?: number;
+  damage_taken?: number;
+  kills?: number;
+  downs?: number;
+  gold_cp?: number;
+}
+
+export interface Epilogue {
+  status: "writing" | "done" | "error";
+  title?: string | null;
+  text?: string | null;
+  error?: string | null;
+  written_at?: string | null;
+  /** character id → what became of them */
+  characters: Record<string, string>;
+  stats: Record<string, CampaignStats>;
+  party: { days?: number; quests_done?: number; quests_failed?: number; npcs_met?: number; places?: number };
+}
+
 export interface GameView {
   game: {
     id: string;
@@ -792,7 +835,14 @@ export interface GameView {
   scene_art?: string | null;
   shop: Shop | null;
   npcs: { name: string; role: string; attitude: string; notes: string; portrait_url?: string | null }[];
-  quests: { title: string; status: "active" | "done" | "failed"; notes: string }[];
+  quests: { title: string; status: "active" | "done" | "failed"; notes: string; day?: number; ended_day?: number }[];
+  /** The party journal the DM keeps: clues, places and key moments. */
+  journal?: JournalEntry[];
+  /** The players' own notes (the DM never sees them). */
+  party_notes?: PartyNote[];
+  /** The DM says the main story has reached its end; the host can close the campaign. */
+  story_complete?: boolean;
+  epilogue?: Epilogue | null;
   log: LogEntry[];
   dm: { engine: string; model: string; busy: boolean };
 }
