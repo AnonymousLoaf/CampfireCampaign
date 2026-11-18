@@ -393,11 +393,41 @@ async def _edit_character(u: User, cid: str, fn: Callable[[dict], Any]) -> dict:
         except RulesError as e:
             raise HTTPException(400, str(e))
         c.sheet = sheet
+        c.name = sheet.get("name", c.name)
         flag_modified(c, "sheet")
         db.commit()
         return ch.view(c.id, c.owner_id, c.game_id, c.sheet)
     finally:
         db.close()
+
+
+# ── details a player can change any time (story, not rules) ──
+class DetailsBody(BaseModel):
+    name: str | None = Field(None, max_length=40)
+    alignment: str | None = None
+    backstory: str | None = Field(None, max_length=4000)
+    color: str | None = Field(None, pattern=r"^#[0-9a-fA-F]{6}$")
+
+
+@router.patch("/characters/{cid}/details")
+async def edit_details(cid: str, body: DetailsBody, u: User = Depends(current_user)):
+    from .rules.classes import ALIGNMENTS
+
+    def fn(sheet: dict) -> None:
+        if body.name is not None:
+            name = " ".join(body.name.split())
+            if not name:
+                raise RulesError("give your character a name")
+            sheet["name"] = name
+        if body.alignment is not None:
+            if body.alignment not in ALIGNMENTS:
+                raise RulesError("pick one of the nine alignments")
+            sheet["alignment"] = body.alignment
+        if body.backstory is not None:
+            sheet["backstory"] = body.backstory.strip()
+        if body.color is not None:
+            sheet["color"] = body.color
+    return await _edit_character(u, cid, fn)
 
 
 # ── portraits ──────────────────────────────────────────────────────────────

@@ -119,6 +119,8 @@ export const api = {
   deleteCharacter: (id: string) => del<Ok>(`/characters/${id}`),
 
   // portraits (M4)
+  editDetails: (id: string, body: { name?: string; alignment?: string; backstory?: string; color?: string }) =>
+    patch<CharacterView>(`/characters/${id}/details`, body),
   uploadPortrait: (id: string, file: File) => {
     const fd = new FormData();
     fd.append("image", file);
