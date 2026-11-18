@@ -489,13 +489,13 @@ function Spells({ c, editable }: { c: CharacterView; editable: boolean }) {
       )}
       <div className="slot-row">
         {Object.entries(sc.slots).map(([lvl, s]) => (
-          <div key={lvl} className="slot-group">
+          <div key={lvl} className="slot-group" title={slotHint(s.max - s.used, s.max, `${ordinal(Number(lvl))}-level`, "on a long rest")}>
             <span className="small">Level {lvl}</span>
             <SlotPips max={s.max} used={s.used} />
           </div>
         ))}
         {sc.pact && (
-          <div className="slot-group pact">
+          <div className="slot-group pact" title={slotHint(sc.pact.max - sc.pact.used, sc.pact.max, `pact (${ordinal(sc.pact.level)}-level)`, "on a short or long rest")}>
             <span className="small">Pact (level {sc.pact.level})</span>
             <SlotPips max={sc.pact.max} used={sc.pact.used} />
             <span className="muted tiny-text">short rest</span>
@@ -588,6 +588,15 @@ function Spells({ c, editable }: { c: CharacterView; editable: boolean }) {
       )}
     </div>
   );
+}
+
+function ordinal(n: number): string {
+  return n === 1 ? "1st" : n === 2 ? "2nd" : n === 3 ? "3rd" : `${n}th`;
+}
+
+/** Hover text for a row of spell slots. */
+function slotHint(left: number, max: number, kind: string, refill: string): string {
+  return `${left} of ${max} ${kind} spell slot${max === 1 ? "" : "s"} left (filled circle = available). Each spell you cast uses a slot of its level or higher; they refill ${refill}. Cantrips are free.`;
 }
 
 function SlotPips({ max, used }: { max: number; used: number }) {
