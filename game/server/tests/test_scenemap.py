@@ -284,3 +284,38 @@ def test_split_party_gets_its_own_map_and_regroups():
         v = host.get(f"/api/games/{gid}/view").json()
         assert [m["title"] for m in v["scene_maps"]] == ["Chapel"]
         assert sorted(t["name"] for t in v["scene_map"]["tokens"]) == ["Codrina", "Sevro"]
+
+
+def test_a_fight_brings_a_split_party_back_together():
+    from fastapi.testclient import TestClient
+
+    from app.db import SessionLocal
+    from app.dm.tools import ToolBox
+    from app.game.state import load
+    from app.main import app
+
+    from .test_chat import _character, _client
+
+    with TestClient(app):
+        host, guest = _client("fighthost"), _client("fightguest")
+        gid = host.post("/api/games", json={"name": "Regroup", "character_id": _character(host, "Sevro"),
+                                            "settings": {"ruleset": "2024"}}).json()["id"]
+        code = host.get(f"/api/games/{gid}/view").json()["game"]["invite_code"]
+        assert guest.post("/api/games/join", json={"invite_code": code,
+                                                   "character_id": _character(guest, "Codrina")}).status_code == 200
+        db = SessionLocal()
+        try:
+            ctx = load(db, gid)
+            tb = ToolBox(ctx)
+            tb.call("draw_scene_map", {"terrain": "town", "rows": FORK, "party_at": {"x": 4, "y": 6}, "title": "Chapel"})
+            tb.call("draw_scene_map", {"terrain": "town", "rows": ["#####", "#...#", "#...#", "#####"],
+                                       "party_at": {"x": 2, "y": 1}, "title": "Tunnel", "characters": ["Codrina"]})
+            assert ctx.state.get("side_maps")
+            tb.call("start_combat", {"monsters": [{"name": "Zombie", "count": 1}], "terrain": "ruins"})
+            assert "side_maps" not in ctx.state and ctx.state.get("encounter")
+            ctx.save()
+        finally:
+            db.close()
+        v = host.get(f"/api/games/{gid}/view").json()
+        assert [m["title"] for m in v["scene_maps"]] == ["Chapel"]
+        assert sorted(m for m in v["scene_maps"][0]["members"]) == ["Codrina", "Sevro"]
