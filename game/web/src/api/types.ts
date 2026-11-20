@@ -243,6 +243,7 @@ export interface CharacterSpellcasting {
   prepared_max?: number | null;
   /** Prepared casters: the list can change now (after a long rest or a level up; it locks on the first cast or fight). */
   prep_open?: boolean;
+  always?: string[];
   known?: boolean;
   spellbook?: Spell[] | null;
   options?: Spell[];
