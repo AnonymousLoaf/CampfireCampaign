@@ -483,9 +483,13 @@ function Spells({ c, editable }: { c: CharacterView; editable: boolean }) {
   const busyPhase = view.phase.type === "combat" || view.phase.type === "dm";
   const max = sc.prepared_max ?? sc.options?.length ?? 0;
   const charParam = c.id !== view.me.character_id ? c.id : undefined;
+  // always-prepared spells (a ranger's Hunter's Mark, domain spells) are free: they don't count toward the limit
+  const always = new Set(sc.always ?? []);
+  const alwaysSpells = sc.spells.filter((s) => always.has(s.index));
+  const pickedCount = sc.spells.length - alwaysSpells.length;
 
   const startEdit = () => {
-    setChosen(sc.spells.map((s) => s.index));
+    setChosen(sc.spells.filter((s) => !always.has(s.index)).map((s) => s.index));
     setEditing(true);
   };
 
@@ -522,7 +526,8 @@ function Spells({ c, editable }: { c: CharacterView; editable: boolean }) {
           {sc.prepares && sc.prepared_max ? (
             <span className="muted small">
               {" "}
-              ({sc.spells.length}/{sc.prepared_max})
+              ({pickedCount}/{sc.prepared_max}
+              {alwaysSpells.length ? ` + ${alwaysSpells.length} always prepared` : ""})
             </span>
           ) : null}
         </h4>
@@ -550,6 +555,17 @@ function Spells({ c, editable }: { c: CharacterView; editable: boolean }) {
             Choose up to {max} spells{sc.spellbook ? " from your spellbook" : ""} (up to level {sc.max_spell_level ?? "?"}). {chosen.length}/{max} chosen.
           </p>
           <div className="prepare-list">
+            {alwaysSpells.map((s) => (
+              <label key={s.index} className="prepare-item on" title="Always prepared: it doesn't count toward your limit">
+                <input type="checkbox" checked disabled readOnly />
+                <span>
+                  <strong>{s.name}</strong>{" "}
+                  <span className="muted small">
+                    L{s.level} · always prepared
+                  </span>
+                </span>
+              </label>
+            ))}
             {(sc.options ?? []).map((s) => {
               const on = chosen.includes(s.index);
               return (
