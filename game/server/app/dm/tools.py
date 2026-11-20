@@ -412,6 +412,8 @@ class ToolBox:
         party = self.ctx.living_party()
         if not party:
             raise RulesError("no living party members")
+        # Everyone living is in the fight, so a split party is back together: their separate maps go.
+        self.ctx.state.pop("side_maps", None)
         # On a scene map, fight right there: same layout, the party where they stood, foes where the DM put the
         # hostile NPCs, friendly NPCs as bystanders. Otherwise a generated map for the terrain.
         sm = self.ctx.state.get("scene_map")
